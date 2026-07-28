@@ -106,6 +106,12 @@ PPBPPPPPPP
 
 ![Room 2 layout](room_layout.png)
 
+Rendered in a dark, abandoned-factory palette (`viz.py`): orange lamp glow
+at the start, teal leaking pipes, a bottomless-black abyss, a warm wooden
+bridge plank, a glowing gold access card, and an emergency-green exit door
+— consistent across the grid, the learning-curve panels, and the
+SARSA-vs-Q-Learning comparison plot below.
+
 Upper maze (rows 0-5) with the access card tucked in the top-right corner
 — off the direct route, forcing a real detour — a slippery band right at
 the abyss edge (row 6), the abyss/bridge row (7), and a small goal room

@@ -171,15 +171,19 @@ def main():
     q_avg = sum(h["return"] for h in q_history[-500:]) / 500
     print(f"\nAvg training-time return (last 500 episodes): SARSA={sarsa_avg:.2f}  Q-Learning={q_avg:.2f}")
 
-    fig, ax = plt.subplots(figsize=(8, 5))
-    ax.plot(_rolling_mean([h["return"] for h in sarsa_history], 50), label="SARSA", color="#1f6feb")
-    ax.plot(_rolling_mean([h["return"] for h in q_history], 50), label="Q-Learning", color="#e8590c")
+    from viz import BG_COLOR, PANEL_COLOR, GRID_LINE_COLOR, TEXT_COLOR, _style_dark_axes
+
+    fig, ax = plt.subplots(figsize=(8, 5), facecolor=BG_COLOR)
+    ax.plot(_rolling_mean([h["return"] for h in sarsa_history], 50), label="SARSA", color="#5fd0ff")
+    ax.plot(_rolling_mean([h["return"] for h in q_history], 50), label="Q-Learning", color="#ff7a1a")
     ax.set_xlabel("episode")
     ax.set_ylabel("return (rolling mean, window=50)")
     ax.set_title("Training-time return: SARSA vs Q-Learning")
-    ax.legend()
+    ax.legend(facecolor=PANEL_COLOR, labelcolor=TEXT_COLOR, edgecolor=GRID_LINE_COLOR)
+    _style_dark_axes(ax)
+    ax.grid(True, color=GRID_LINE_COLOR, linewidth=0.5)
     fig.tight_layout()
-    fig.savefig("sarsa_vs_qlearning.png", dpi=110)
+    fig.savefig("sarsa_vs_qlearning.png", dpi=110, facecolor=fig.get_facecolor())
     print("saved sarsa_vs_qlearning.png")
 
 
