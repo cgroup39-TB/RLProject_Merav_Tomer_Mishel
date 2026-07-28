@@ -20,17 +20,18 @@ from room2_env import make_room2_env
 
 @dataclass
 class TrainRoom2Config:
-    # Defaults are the fastest-converging config found by hyperparam_sweep.py
-    # (see sweep_results.csv): reaches 100% greedy success in ~235 episodes
-    # on the key+bridge layout, vs. 400-1500+ (or outright failure to
-    # converge in time) for slower epsilon decays.
+    # Defaults are the best config found by hyperparam_sweep.py (see
+    # sweep_results.csv) on the collapsing-bridge layout: ~98.75% greedy
+    # success at ~42 steps, converging by ~episode 600. The slippery abyss
+    # edge means even a good policy has some irreducible slip-into-the-
+    # abyss risk, so 100% isn't attainable here the way it was pre-bridge.
     episodes: int = 3000
     max_steps: int = 200
     alpha: float = 0.3
-    gamma: float = 0.9
+    gamma: float = 0.95
     epsilon_start: float = 1.0
     epsilon_min: float = 0.05
-    epsilon_decay: float = 0.99
+    epsilon_decay: float = 0.995
     slip_prob: float = 0.2
     seed: Optional[int] = 0
     results_dir: str = "results/room2"

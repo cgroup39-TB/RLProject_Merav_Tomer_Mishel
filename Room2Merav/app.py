@@ -99,18 +99,19 @@ def render_replay(trajectories: dict):
 
 
 def main():
-    st.title("🧊 Room 2 — SARSA")
-    st.caption("Model unknown, on-policy TD control, slippery tiles.")
+    st.title("🌉 Room 2 — The Collapsing Bridge (SARSA)")
+    st.caption("Abandoned factory, unknown model, on-policy TD control.")
 
     cfg, train_clicked = render_sidebar()
 
     col_grid, col_info = st.columns([1, 1])
     with col_grid:
         st.subheader("Room layout")
-        st.pyplot(render_grid(ROOM2_LAYOUT, title="Room 2"))
+        st.pyplot(render_grid(ROOM2_LAYOUT, title="Room 2: The Collapsing Bridge"))
         st.caption(
-            "S=start · 🔑=key (must collect before G opens) · G=goal (exit) · "
-            "▩ wall · ~ slippery · P=pit (row 7 is only crossable at the bridge, col 2)"
+            "S=start · K=access card (must collect before the door opens) · "
+            "G=door/exit · ▩ wall · ~ slippery (leaking pipes) · "
+            "P=abyss · B=bridge (collapses the first time you step off it)"
         )
 
     if train_clicked:

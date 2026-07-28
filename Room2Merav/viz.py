@@ -12,13 +12,14 @@ from matplotlib.figure import Figure
 CELL_COLORS = {
     ".": "#f5f5f5",  # empty
     "#": "#333333",  # wall
-    "~": "#a8d8ff",  # slippery
-    "P": "#e05555",  # pit
-    "K": "#ffd54f",  # key
+    "~": "#a8d8ff",  # slippery (leaking pipes)
+    "P": "#e05555",  # abyss
+    "B": "#c68642",  # bridge (wood plank)
+    "K": "#ffd54f",  # access card
     "S": "#ffe082",  # start
-    "G": "#66bb6a",  # goal
+    "G": "#66bb6a",  # goal / door
 }
-CELL_LABELS = {"P": "P", "K": "K", "S": "S", "G": "G"}
+CELL_LABELS = {"P": "P", "B": "B", "K": "K", "S": "S", "G": "G"}
 
 
 def _rolling_mean(values: list[float], window: int) -> list[float]:
@@ -72,13 +73,14 @@ def plot_learning_curves(history: list[dict], window: int = 50) -> Figure:
 def trajectory_to_positions(trajectory: list[dict], n_cols: int = 10) -> list[tuple[int, int]]:
     """Convert a recorded trajectory's flat state indices to (row, col) coords.
 
-    State indices encode (row, col, has_key) as (row*n_cols+col)*2+has_key
-    (see grid_env.GridWorld.encode_state) -- the has_key bit is dropped
-    here since rendering only needs position.
+    State indices encode (row, col, has_key, bridge_collapsed) as
+    ((row*n_cols+col)*2+has_key)*2+bridge_collapsed (see
+    grid_env.GridWorld.encode_state) -- both flag bits are dropped here
+    since rendering only needs position.
     """
     positions = []
     for step in trajectory:
-        pos_index = step["state"] // 2
+        pos_index = step["state"] // 4
         positions.append(divmod(pos_index, n_cols))
     return positions
 
