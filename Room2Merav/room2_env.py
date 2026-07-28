@@ -42,7 +42,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from environments.grid_world import GridWorld, GridWorldConfig
+from grid_env import GridWorld, GridWorldConfig
 
 ROOM2_LAYOUT = (
     "S...#.....",

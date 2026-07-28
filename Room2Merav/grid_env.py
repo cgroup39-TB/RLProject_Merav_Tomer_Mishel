@@ -1,4 +1,4 @@
-"""Shared 10x10 grid-world engine for the escape-room chapters (Rooms 1-3).
+"""10x10 grid-world engine for Room 2 (SARSA).
 
 Layout symbols:
     S   start cell (exactly one)
@@ -8,9 +8,8 @@ Layout symbols:
     T   trap (optional): terminates the episode with a penalty
     .   free cell
 
-Room-specific modules (e.g. room2_sarsa_env.py) configure the layout and
-reward shaping; this module only implements movement dynamics shared by
-every room built on a grid.
+room2_env.py configures the layout and reward shaping; this module only
+implements the movement dynamics.
 """
 from __future__ import annotations
 

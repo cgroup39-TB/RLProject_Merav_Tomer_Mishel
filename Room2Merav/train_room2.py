@@ -14,8 +14,8 @@ from typing import Optional
 
 import numpy as np
 
-from agents.sarsa_agent import SARSAAgent, SARSAConfig
-from environments.room2_sarsa_env import make_room2_env
+from sarsa_agent import SARSAAgent, SARSAConfig
+from room2_env import make_room2_env
 
 
 @dataclass
