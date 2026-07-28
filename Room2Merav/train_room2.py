@@ -21,12 +21,12 @@ from room2_env import make_room2_env
 @dataclass
 class TrainRoom2Config:
     # Defaults are the fastest-converging config found by hyperparam_sweep.py
-    # (see sweep_results.csv): reaches 100% greedy success and the
-    # BFS-optimal ~18-step path in ~125 episodes, vs. 200-1000+ for slower
-    # epsilon decays.
+    # (see sweep_results.csv): reaches 100% greedy success in ~235 episodes
+    # on the key+bridge layout, vs. 400-1500+ (or outright failure to
+    # converge in time) for slower epsilon decays.
     episodes: int = 3000
     max_steps: int = 200
-    alpha: float = 0.2
+    alpha: float = 0.3
     gamma: float = 0.9
     epsilon_start: float = 1.0
     epsilon_min: float = 0.05

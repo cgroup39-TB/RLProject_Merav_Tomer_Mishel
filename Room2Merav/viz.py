@@ -13,11 +13,12 @@ CELL_COLORS = {
     ".": "#f5f5f5",  # empty
     "#": "#333333",  # wall
     "~": "#a8d8ff",  # slippery
-    "T": "#e05555",  # trap
+    "P": "#e05555",  # pit
+    "K": "#ffd54f",  # key
     "S": "#ffe082",  # start
     "G": "#66bb6a",  # goal
 }
-CELL_LABELS = {"T": "T", "S": "S", "G": "G"}
+CELL_LABELS = {"P": "P", "K": "K", "S": "S", "G": "G"}
 
 
 def _rolling_mean(values: list[float], window: int) -> list[float]:
@@ -69,8 +70,17 @@ def plot_learning_curves(history: list[dict], window: int = 50) -> Figure:
 
 
 def trajectory_to_positions(trajectory: list[dict], n_cols: int = 10) -> list[tuple[int, int]]:
-    """Convert a recorded trajectory's flat state indices to (row, col) coords."""
-    return [divmod(step["state"], n_cols) for step in trajectory]
+    """Convert a recorded trajectory's flat state indices to (row, col) coords.
+
+    State indices encode (row, col, has_key) as (row*n_cols+col)*2+has_key
+    (see grid_env.GridWorld.encode_state) -- the has_key bit is dropped
+    here since rendering only needs position.
+    """
+    positions = []
+    for step in trajectory:
+        pos_index = step["state"] // 2
+        positions.append(divmod(pos_index, n_cols))
+    return positions
 
 
 def render_grid(

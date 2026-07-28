@@ -15,12 +15,17 @@ streamlit run app.py
 
 ## State space
 
-Discrete, 100 states — one per `(row, col)` cell on the 10x10 grid,
-flattened to an index `0..99` (`row * 10 + col`). The agent only ever
-observes this index, never the transition probabilities: that's what
-"model unknown" means here — SARSA learns `Q(s, a)` purely from
-`(state, action, reward, next_state, next_action)` tuples collected by
-interacting with the environment, never from a `P(s'|s,a)` table.
+Discrete, **200 states** — `(row, col, has_key)` on the 10x10 grid, flattened
+to a single index (`grid_env.GridWorld.encode_state`). The `has_key` bit is
+part of the *true* state, not just bookkeeping: the same `(row, col)` cell
+means something different depending on whether the key was already
+collected (specifically, `G` only ends the episode once `has_key` is true),
+so leaving it out of the state would break the Markov property that SARSA's
+update rule relies on. The agent only ever observes this index, never the
+transition probabilities: that's what "model unknown" means here — SARSA
+learns `Q(s, a)` purely from `(state, action, reward, next_state,
+next_action)` tuples collected by interacting with the environment, never
+from a `P(s'|s,a)` table.
 
 ## Action space
 
@@ -33,14 +38,21 @@ step reward.
 | Event | Reward |
 |---|---|
 | Every step | `-1` (time cost) |
-| Stepping onto a trap (`T`) | `-20`, episode ends |
-| Reaching the goal (`G`, the single exit) | `max(100 - steps_taken, 20)` |
-| Truncated at `max_steps` without reaching `G` | `0` bonus |
+| Stepping onto a pit cell (`P`) | `-20`, episode ends |
+| Stepping onto the key (`K`), first time | `-1 + 10` (step cost + one-time subgoal bonus) |
+| Reaching the goal (`G`) **while holding the key** | `max(100 - steps_taken, 20)`, episode ends |
+| Reaching `G` **without** the key | `-1` — just a normal floor cell, episode continues |
+| Truncated at `max_steps` without reaching `G` (with key) | `0` bonus |
 
 The goal bonus shrinks with the number of steps taken (down to a floor of
 20), which directly implements the assignment's "the faster the agent
 escapes, the higher the reward" requirement, instead of leaving that
-implicit in the discount factor alone.
+implicit in the discount factor alone. The key's one-time `+10` is a
+subgoal reward-shaping bonus: without it, the only feedback distinguishing
+"has key" from "no key" is the (temporally distant) goal payoff, which
+gives a flat tabular agent very little signal to bother detouring for the
+key at all — the bonus makes that credit assignment tractable within a
+reasonable number of episodes.
 
 ## Slippery cells (`~`)
 
@@ -54,26 +66,34 @@ experience.
 ## Room layout
 
 ```
-S...#.....
+S...#....K
 .##.#.###.
 ....#.....
 .###.#.##.
 ....~.....
 .#.#~#.#..
 .#.#~#.#..
-.#...#.#..
-.#.###.#T.
-.......#.G
+PP.PPPPPPP
+..........
+.........G
 ```
 
-`S` start · `G` goal/exit · `#` wall · `~` slippery · `T` trap
+`S` start · `K` key · `G` goal/exit (locked until key collected) · `#` wall ·
+`~` slippery · `P` pit
 
 ![Room 2 layout](room_layout.png)
 
-A wall maze harder than Room 1's open grid, a 3-cell vertical slip
-corridor the agent must cross, and one trap placed off the shortest path
-so it punishes careless exploration without being unavoidable. The
-shortest path (BFS) from `S` to `G` is **18 steps**.
+A wall maze in the upper section with a 3-cell vertical slip corridor, the
+key tucked in the top-right corner — off the direct route, forcing a real
+detour — and a full-width **pit band** (row 7) separating the upper maze
+from the goal room below, crossable only at the single **bridge** cell
+(column 2, left as plain floor). Stepping on any other cell in that row
+ends the episode, same as falling in.
+
+BFS distances (ignoring the key requirement, since the key changes
+*whether* `G` terminates, not reachability): `S → K` is 17 steps, `K → G`
+is 23 more — so the shortest key-then-exit route is around 40 steps, all of
+it funneled through the row-7 bridge.
 
 ## SARSA update rule
 
@@ -99,24 +119,32 @@ eventually reach 100% success on this maze, so convergence speed is the
 real differentiator, and it's the one that matters for a "faster escape"
 framing.
 
+With the key+bridge mechanic, the two-subgoal task is noticeably harder to
+credit-assign than plain navigation: some `(alpha, gamma)` combinations
+paired with a slow `epsilon_decay` (`0.999`) never converge within 2000
+training episodes at all (0% greedy success) — the agent decays its
+exploration to the minimum before it has stumbled onto enough
+key-then-goal sequences to learn from. A fast decay (`0.99`) consistently
+converges within a few hundred episodes.
+
 | Parameter | Value |
 |---|---|
-| `alpha` (learning rate) | **0.2** |
+| `alpha` (learning rate) | **0.3** |
 | `gamma` (discount) | **0.9** |
 | `epsilon_start` | 1.0 |
 | `epsilon_min` | 0.05 |
 | `epsilon_decay` | **0.99** |
 
 These are `TrainRoom2Config`'s defaults. This config reaches 100% greedy
-success in ~125 episodes and converges to the BFS-optimal ~18-19 step
-path, versus 200-1000+ episodes for slower epsilon decays (`0.995`,
-`0.999`) — see `sweep_results.csv` for the full grid. Full run (3000
-episodes, these defaults):
+success in ~235 episodes, versus 400-1500+ episodes (or outright failure to
+converge in time) for slower epsilon decays — see `sweep_results.csv` for
+the full grid. Full run (3000 episodes, these defaults):
 
 ![Learning curves](learning_curve.png)
 
-- Success rate: ~15% (first 50 episodes) → ~98-100% (last 50 episodes)
-- Average steps on success: ~19, matching the BFS-optimal 18-step path
+- Success rate: 0% (first 50 episodes) → ~98-100% (last 50 episodes)
+- Average steps on success: ~40-46, consistent with the ~40-step
+  `S → K → bridge → G` shortest route
 
 ## Episode replay
 

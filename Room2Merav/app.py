@@ -108,7 +108,10 @@ def main():
     with col_grid:
         st.subheader("Room layout")
         st.pyplot(render_grid(ROOM2_LAYOUT, title="Room 2"))
-        st.caption("S=start · G=goal (exit) · ▩ wall · ~ slippery · T trap")
+        st.caption(
+            "S=start · 🔑=key (must collect before G opens) · G=goal (exit) · "
+            "▩ wall · ~ slippery · P=pit (row 7 is only crossable at the bridge, col 2)"
+        )
 
     if train_clicked:
         with st.spinner(f"Training SARSA for {cfg.episodes} episodes..."):
