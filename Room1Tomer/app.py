@@ -16,7 +16,6 @@ import streamlit as st
 
 from grid_env import GridConfig, GridWorldEnv, Cell, ACTION_ARROWS, default_config
 from dp_solver import value_iteration, policy_iteration
-from sarsa_solver import sarsa
 
 
 st.set_page_config(page_title="Escape Room RL", page_icon="🗝️", layout="wide")
@@ -243,51 +242,6 @@ def train_room1(params):
         st.session_state.unlocked_room = max(st.session_state.unlocked_room, 2)
 
 
-# ---------------------------------------------------------------------------
-# training + results (Room 2 — SARSA)
-# ---------------------------------------------------------------------------
-def train_room2(params):
-    cfg = build_config()
-    env = GridWorldEnv(
-        cfg,
-        slip_prob=params["slip_prob"],
-        step_reward=params["step_reward"],
-        goal_reward=params["goal_reward"],
-        trap_reward=params["trap_reward"],
-        gamma=params["gamma"],
-        potential_shaping=params["shaping"],
-    )
-    Q, policy, info = sarsa(
-        env, env.n_states, env.n_actions,
-        episodes=int(params["episodes"]), alpha=params["alpha"], gamma=params["gamma"],
-        epsilon=params["epsilon"], epsilon_min=params["epsilon_min"],
-        epsilon_decay=params["epsilon_decay"], max_steps=env.max_steps,
-    )
-    V_like = Q.max(axis=1)  # for the heatmap: greedy value estimate per state
-
-    s = env.reset()
-    path = [env.i2s(s)]
-    total_reward = 0.0
-    solved = False
-    for _ in range(env.max_steps):
-        a = int(policy[s])
-        s, r, done, truncated, _ = env.step(a)
-        total_reward += r
-        path.append(env.i2s(s))
-        if done:
-            solved = env.cfg.cell_type(*env.i2s(s)) == Cell.GOAL
-            break
-        if truncated:
-            break
-
-    st.session_state.results[2] = dict(
-        env=env, V=V_like, policy=policy, info=info,
-        path=path, total_reward=total_reward, solved=solved,
-    )
-    if solved:
-        st.session_state.unlocked_room = max(st.session_state.unlocked_room, 3)
-
-
 def plot_result(res):
     env = res["env"]
     V = res["V"].reshape(env.rows, env.cols)
@@ -341,42 +295,6 @@ def render_results():
             st.success("🔓 Room 2 unlocked!")
 
 
-def plot_training_curve(reward_history, window=50):
-    fig, ax = plt.subplots(figsize=(6, 2.8))
-    ax.plot(reward_history, color="gray", alpha=0.3, linewidth=0.7, label="episode reward")
-    if len(reward_history) >= window:
-        smoothed = np.convolve(reward_history, np.ones(window) / window, mode="valid")
-        ax.plot(range(window - 1, len(reward_history)), smoothed, color="orange", linewidth=2, label=f"moving avg ({window})")
-    ax.set_xlabel("Episode")
-    ax.set_ylabel("Total reward")
-    ax.legend(loc="lower right", fontsize=8)
-    plt.tight_layout()
-    return fig
-
-
-def render_results_room2():
-    st.subheader("📊 Results")
-    res = st.session_state.results.get(2)
-    if res is None:
-        st.info("Design your grid and press **Train Agent**.")
-        return
-
-    st.pyplot(plot_training_curve(res["info"]["reward_history"]))
-
-    c1, c2 = st.columns([2, 1])
-    with c1:
-        st.pyplot(plot_result(res))
-    with c2:
-        st.metric("Reached goal?", "✅ Yes" if res["solved"] else "❌ No")
-        st.metric("Episode reward", f"{res['total_reward']:.1f}")
-        st.metric("Steps to exit", len(res["path"]) - 1)
-        st.divider()
-        st.write("**Episodes trained:**", res["info"]["episodes"])
-        st.write("**Final ε:**", f"{res['info']['final_epsilon']:.3f}")
-        if res["solved"] and st.session_state.unlocked_room >= 3:
-            st.success("🔓 Room 3 unlocked!")
-
-
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
@@ -408,12 +326,6 @@ def main():
         if train_clicked:
             train_room1(params)
         render_results()
-    elif room == 2:
-        st.caption(f"**Room 2 — {ROOMS[1]['name']}** ({ROOMS[1]['subtitle']})")
-        render_grid_editor()
-        if train_clicked:
-            train_room2(params)
-        render_results_room2()
     else:
         st.info(f"Room {room} — {ROOMS[room-1]['name']} — 🚧 coming soon, we'll build it next.")
 
