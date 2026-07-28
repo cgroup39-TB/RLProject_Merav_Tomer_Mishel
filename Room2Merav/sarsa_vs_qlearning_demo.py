@@ -30,10 +30,10 @@ class QLearningConfig:
     n_states: int
     n_actions: int
     alpha: float = 0.3
-    gamma: float = 0.95
+    gamma: float = 0.9
     epsilon_start: float = 1.0
     epsilon_min: float = 0.05
-    epsilon_decay: float = 0.995
+    epsilon_decay: float = 0.99
     seed: Optional[int] = None
 
 
@@ -107,11 +107,11 @@ def rollout_greedy(agent, slip_prob: float, max_steps: int, seed: int):
     return success, len(positions) - 1, lateral_in_row6, positions
 
 
-def train_sarsa(episodes: int, slip_prob: float, max_steps: int, seed: int):
+def train_sarsa(episodes: int, slip_prob: float, max_steps: int, seed: int, **agent_kwargs):
     from sarsa_agent import SARSAAgent, SARSAConfig
 
     env = make_room2_env(slip_prob=slip_prob, max_steps=max_steps, seed=seed)
-    agent = SARSAAgent(SARSAConfig(n_states=env.n_states, n_actions=env.n_actions, seed=seed))
+    agent = SARSAAgent(SARSAConfig(n_states=env.n_states, n_actions=env.n_actions, seed=seed, **agent_kwargs))
     history = []
     for ep in range(episodes):
         state, _ = env.reset()

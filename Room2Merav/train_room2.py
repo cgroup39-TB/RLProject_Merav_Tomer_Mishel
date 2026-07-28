@@ -21,17 +21,17 @@ from room2_env import make_room2_env
 @dataclass
 class TrainRoom2Config:
     # Defaults are the best config found by hyperparam_sweep.py (see
-    # sweep_results.csv) on the collapsing-bridge layout: ~98.75% greedy
-    # success at ~42 steps, converging by ~episode 600. The slippery abyss
-    # edge means even a good policy has some irreducible slip-into-the-
-    # abyss risk, so 100% isn't attainable here the way it was pre-bridge.
+    # sweep_results.csv) on the collapsing-bridge layout with scattered
+    # walls: ~99.75% greedy success at ~42 steps, converging by ~episode
+    # 435. The slippery abyss edge still means even a good policy carries
+    # some irreducible slip-into-the-abyss risk, so 100% isn't guaranteed.
     episodes: int = 3000
     max_steps: int = 200
     alpha: float = 0.3
-    gamma: float = 0.95
+    gamma: float = 0.9
     epsilon_start: float = 1.0
     epsilon_min: float = 0.05
-    epsilon_decay: float = 0.995
+    epsilon_decay: float = 0.99
     slip_prob: float = 0.2
     seed: Optional[int] = 0
     results_dir: str = "results/room2"

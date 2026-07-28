@@ -2,9 +2,9 @@
 
 Layout symbols:
     S   start cell (exactly one)
-    G   goal/exit door (exactly one) -- locked until the access card is held
-    K   access card (exactly one) -- must be collected before G will end
-        the episode
+    G   goal/exit door (exactly one) -- locked until the key is held
+    K   key (exactly one) -- must be collected before G will end the
+        episode
     #   wall (impassable -- factory machinery, pipes, etc.)
     ~   slippery floor (leaking pipes): the action taken may slip to a
         perpendicular direction

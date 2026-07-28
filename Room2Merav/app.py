@@ -68,7 +68,7 @@ def render_page_header() -> None:
         """
         <div style='padding:24px; background:linear-gradient(180deg, rgba(18,22,29,0.95), rgba(8,10,14,0.95)); border:1px solid #2a2e34; border-radius:22px; margin-bottom:20px;'>
             <h1 style='margin:0; color:#ff8a1a; font-size:2.4rem;'>🌉 Room 2 — The Collapsing Bridge</h1>
-            <p style='margin:10px 0 0 0; color:#cbd5e1; font-size:1.05rem; line-height:1.65;'>SARSA explores an abandoned factory, secures the access card, and chooses the safest path across a collapsing bridge while avoiding slippery pipes and a bottomless abyss.</p>
+            <p style='margin:10px 0 0 0; color:#cbd5e1; font-size:1.05rem; line-height:1.65;'>SARSA explores an abandoned factory, secures the key, and chooses the safest path across a collapsing bridge while avoiding slippery pipes and a bottomless abyss.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -88,9 +88,9 @@ init_state()
 
 
 LEGEND_ITEMS = [
-    ("💡", "Start — the lamp you woke up next to"),
-    ("🪪", "Access card — collect before the door opens"),
-    ("🚪", "Door — the exit, locked without the card"),
+    ("🚩", "Start — where you wake up"),
+    ("🔑", "Key — collect before the door opens"),
+    ("🚪", "Door — the exit, locked without the key"),
     ("🧱", "Wall — factory machinery, impassable"),
     ("💧", "Leaking pipes — slippery floor"),
     ("⚫", "The abyss — one step in, episode over"),
@@ -164,7 +164,7 @@ def render_metrics(history: list[dict], window: int = 50):
 
 def render_room_briefing() -> None:
     st.markdown("### 📋 Mission briefing")
-    st.markdown("- **משימה:** קח את כרטיס הגישה ואז פתח את הדלת.")
+    st.markdown("- **משימה:** קח את המפתח ואז פתח את הדלת.")
     st.markdown("- **סכנות:** תהום, רצפה חלקלקה, וגשר שקורס אחרי חצייה.")
     st.markdown("- **עיקרון:** SARSA לומד להימנע מסיכונים בסביבה חלקלקה.")
 

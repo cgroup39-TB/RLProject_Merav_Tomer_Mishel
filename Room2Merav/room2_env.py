@@ -2,9 +2,9 @@
 
 Theme: an abandoned factory. A chasm (the abyss) splits it in two; the only
 way across is a single walkway (the bridge) that gives out the moment you
-step off it. An access card, tucked away from the direct route, unlocks the
-exit door. Leaking pipes make some floor tiles slippery -- including right
-at the edge of the abyss, which is the whole point of this room: an
+step off it. A key, tucked away from the direct route, unlocks the exit
+door. Leaking pipes make some floor tiles slippery -- including right at
+the edge of the abyss, which is the whole point of this room: an
 on-policy agent that has to live with the consequences of its own
 exploration should learn to keep its distance from a hazard a random slip
 could drop it into, more so than an agent that always assumes it'll play
@@ -12,14 +12,14 @@ optimally from here on (Q-Learning, Room 3). See sarsa_vs_qlearning_demo.py
 for a side-by-side check of that claim.
 
 Design (state / action / reward), per the assignment brief, course slides,
-and the team's spec for this room (bridge over a chasm, access card that
-unlocks the door):
+and the team's spec for this room (bridge over a chasm, key that unlocks
+the door):
 
 State space
     Discrete, 400 states: (row, col, has_key, bridge_collapsed) flattened
     to a single index -- see grid_env.GridWorld.encode_state. Both flags
     have to be part of the *true* state (not just environment bookkeeping):
-    the same cell behaves differently once the card is held (G becomes a
+    the same cell behaves differently once the key is held (G becomes a
     terminal exit) and once the bridge has been used (stepping back onto
     it becomes fatal instead of safe). Leaving either out of the state
     would break the Markov property SARSA's update rule relies on. The
@@ -36,13 +36,13 @@ Reward function
         stepping back onto the bridge ('B') after it has already
         collapsed, which is exactly as fatal.
     +10 (one-time, on top of the step cost), the first time the agent
-        reaches the access card ('K') -- a subgoal bonus so a flat tabular
-        agent has a learnable signal to bother detouring for it.
-    On reaching the door ('G') *while holding the access card*, the
-    terminal exit: reward = max(100 - steps_taken, 20) -- a large bonus
-    that shrinks the longer the episode takes, implementing "the faster
-    the agent escapes, the higher the reward."
-    Reaching 'G' *without* the card is just a normal floor cell (locked
+        reaches the key ('K') -- a subgoal bonus so a flat tabular agent
+        has a learnable signal to bother detouring for it.
+    On reaching the door ('G') *while holding the key*, the terminal exit:
+    reward = max(100 - steps_taken, 20) -- a large bonus that shrinks the
+    longer the episode takes, implementing "the faster the agent escapes,
+    the higher the reward."
+    Reaching 'G' *without* the key is just a normal floor cell (locked
     door, no bonus, no termination).
     Episodes are truncated (no bonus) after `max_steps`.
 
@@ -57,18 +57,20 @@ Slippery cells ('~') and the abyss edge
 Bridge ('B')
     Row 7 is the abyss save for a single bridge cell (col 2). Stepping off
     it collapses it for the rest of the episode -- a second crossing
-    attempt falls straight through. The card sits on the near (start) side
+    attempt falls straight through. The key sits on the near (start) side
     of the bridge, so the intended solution never needs a second crossing;
     the collapse mainly punishes an agent that hasn't planned its route.
 
 Layout
-    Upper maze (rows 0-5) with the access card in the top-right corner --
-    off the direct route, forcing a real detour -- a slippery band right
-    at the abyss edge (row 6), the abyss/bridge row (7), and a small goal
-    room (rows 8-9) with the locked door below it. "Repair area" (the
-    assignment's added flavor note) is represented as the maze's walled
-    sections generally -- no distinct game mechanic was specified for it,
-    so it's treated as scenery rather than a new hazard type.
+    Upper maze (rows 0-5) with the key in the top-right corner -- off the
+    direct route, forcing a real detour -- scattered single-cell walls
+    (rather than clustered blocks) standing in for factory machinery, a
+    slippery band right at the abyss edge (row 6), the abyss/bridge row
+    (7), and a small goal room (rows 8-9) with the locked door below it.
+    "Repair area" (the assignment's added flavor note) is represented as
+    the maze's walled sections generally -- no distinct game mechanic was
+    specified for it, so it's treated as scenery rather than a new hazard
+    type.
 """
 from __future__ import annotations
 
@@ -77,12 +79,12 @@ from typing import Optional
 from grid_env import GridWorld, GridWorldConfig
 
 ROOM2_LAYOUT = (
-    "S...#....K",
-    ".##.#.###.",
-    "....#.....",
-    ".###.#.##.",
-    "....~.....",
-    ".#.#.#.#..",
+    "S..#..#..K",
+    ".#.....#..",
+    "...#..#..#",
+    "#....#..#.",
+    "..#.~..#..",
+    ".#..#.#..#",
     "~~~~~~~~~~",
     "PPBPPPPPPP",
     "..........",

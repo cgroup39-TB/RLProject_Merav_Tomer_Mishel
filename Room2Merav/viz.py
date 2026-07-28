@@ -5,9 +5,9 @@ unit-tested/used standalone; app.py just calls these and hands the returned
 Figure to st.pyplot().
 
 Styled as a dark, abandoned-factory escape room: near-black stone floors
-and machinery, an orange lamp glow at the start, teal leaking pipes, a
-bottomless-black abyss, a warm wooden bridge plank, a glowing gold access
-card, and an emergency-green exit door.
+and machinery, a start flag marking the entry point, teal leaking pipes,
+a bottomless-black abyss, a warm wooden bridge plank, a glowing gold key,
+and an emergency-green exit door.
 """
 from __future__ import annotations
 
@@ -26,8 +26,8 @@ CELL_COLORS = {
     "~": "#1e5f66",  # leaking pipes -- dim teal slick
     "P": "#050505",  # the abyss -- bottomless black
     "B": "#9a6a35",  # bridge plank, warm wood under lamp light
-    "K": "#f2b705",  # access card -- glowing gold
-    "S": "#ff7a1a",  # start -- orange lamp glow
+    "K": "#f2b705",  # key -- glowing gold
+    "S": "#ff7a1a",  # start -- marker tile
     "G": "#28a862",  # door / exit -- emergency-green glow
 }
 WALL_HATCH_COLOR = "#3a3f46"
@@ -37,20 +37,29 @@ AGENT_EDGE_COLOR = "#ffffff"
 
 
 def _draw_start_icon(ax, cx: float, cy: float) -> None:
-    """Lamp glow: a bright core with radiating rays."""
-    ax.add_patch(plt.Circle((cx, cy), 0.15, facecolor="#fff3d6", edgecolor="none", zorder=5))
-    for angle in range(0, 360, 45):
-        rad = np.radians(angle)
-        x0, y0 = cx + 0.18 * np.cos(rad), cy + 0.18 * np.sin(rad)
-        x1, y1 = cx + 0.32 * np.cos(rad), cy + 0.32 * np.sin(rad)
-        ax.plot([x0, x1], [y0, y1], color="#fff3d6", linewidth=1.6, solid_capstyle="round", zorder=5)
+    """Start flag: a pole with a small flag, marking the entry point."""
+    ax.add_patch(plt.Rectangle((cx - 0.03, cy - 0.3), 0.06, 0.55, facecolor="#d8dee6", edgecolor="none", zorder=5))
+    ax.add_patch(plt.Circle((cx, cy + 0.28), 0.045, facecolor="#d8dee6", edgecolor="none", zorder=5))
+    ax.add_patch(
+        plt.Polygon(
+            [(cx + 0.03, cy + 0.24), (cx + 0.34, cy + 0.13), (cx + 0.03, cy + 0.02)],
+            closed=True,
+            facecolor="#fff3d6",
+            edgecolor="#8a6b1a",
+            linewidth=0.8,
+            zorder=5,
+        )
+    )
 
 
-def _draw_card_icon(ax, cx: float, cy: float) -> None:
-    """Access card: rounded card outline, magnetic stripe, photo dot."""
-    ax.add_patch(plt.Rectangle((cx - 0.24, cy - 0.16), 0.48, 0.32, facecolor="#fff7e0", edgecolor="#5c4400", linewidth=1.3, zorder=5))
-    ax.add_patch(plt.Rectangle((cx - 0.24, cy + 0.05), 0.48, 0.07, facecolor="#5c4400", edgecolor="none", zorder=6))
-    ax.add_patch(plt.Circle((cx - 0.12, cy - 0.06), 0.05, facecolor="#5c4400", edgecolor="none", zorder=6))
+def _draw_key_icon(ax, cx: float, cy: float) -> None:
+    """Classic key: a ring bow, a shaft, and two teeth."""
+    outline = "#5c4400"
+    ax.add_patch(plt.Circle((cx - 0.2, cy), 0.15, facecolor=outline, edgecolor="none", zorder=5))
+    ax.add_patch(plt.Circle((cx - 0.2, cy), 0.075, facecolor=CELL_COLORS["K"], edgecolor="none", zorder=6))
+    ax.add_patch(plt.Rectangle((cx - 0.06, cy - 0.045), 0.36, 0.09, facecolor=outline, edgecolor="none", zorder=5))
+    ax.add_patch(plt.Rectangle((cx + 0.18, cy - 0.14), 0.06, 0.1, facecolor=outline, edgecolor="none", zorder=5))
+    ax.add_patch(plt.Rectangle((cx + 0.27, cy - 0.14), 0.06, 0.07, facecolor=outline, edgecolor="none", zorder=5))
 
 
 def _draw_door_icon(ax, cx: float, cy: float) -> None:
@@ -98,7 +107,7 @@ def _draw_slip_icon(ax, cx: float, cy: float) -> None:
 
 CELL_ICONS = {
     "S": _draw_start_icon,
-    "K": _draw_card_icon,
+    "K": _draw_key_icon,
     "G": _draw_door_icon,
     "P": _draw_abyss_icon,
     "B": _draw_bridge_icon,
