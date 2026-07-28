@@ -30,14 +30,25 @@ CELL_COLORS = {
     "G": "#28a862",  # door / exit -- emergency-green glow
 }
 CELL_TEXT_COLORS = {
-    "P": "#8a1f1f",   # dim ember-red label, barely visible in the void
+    "P": "#f0e1a0",
     "B": "#241505",
     "K": "#241505",
     "S": "#241505",
     "G": "#0a2916",
+    "~": "#d3f4ff",
 }
-CELL_LABELS = {"P": "P", "B": "B", "K": "K", "S": "S", "G": "G"}
+CELL_LABELS = {
+    "P": "🕳",
+    "B": "🌉",
+    "K": "🔑",
+    "S": "🏮",
+    "G": "🚪",
+    "~": "💧",
+}
 WALL_HATCH_COLOR = "#3a3f46"
+PATH_COLOR = "#f08f26"
+AGENT_COLOR = "#ffcc33"
+AGENT_EDGE_COLOR = "#ffffff"
 
 
 def _style_dark_axes(ax) -> None:
@@ -160,11 +171,21 @@ def render_grid(
     if path:
         xs = [c + 0.5 for _, c in path]
         ys = [n_rows - 1 - r + 0.5 for r, _ in path]
-        ax.plot(xs, ys, color="#5fd0ff", linewidth=2, alpha=0.9, zorder=3)
+        ax.plot(xs, ys, color=PATH_COLOR, linewidth=3, alpha=0.85, zorder=3)
+        ax.scatter(xs, ys, color=PATH_COLOR, s=30, zorder=4)
 
     if agent_pos:
         r, c = agent_pos
-        ax.plot(c + 0.5, n_rows - 1 - r + 0.5, marker="o", markersize=14, color="#ff2d2d", zorder=4)
+        ax.plot(
+            c + 0.5,
+            n_rows - 1 - r + 0.5,
+            marker="o",
+            markersize=16,
+            color=AGENT_COLOR,
+            markeredgecolor=AGENT_EDGE_COLOR,
+            markeredgewidth=2,
+            zorder=5,
+        )
 
     ax.set_xlim(0, n_cols)
     ax.set_ylim(0, n_rows)

@@ -18,9 +18,21 @@ from room2_env import ROOM2_LAYOUT
 from train_room2 import TrainRoom2Config, train
 from viz import plot_learning_curves, render_grid, render_episode_step
 
-st.set_page_config(page_title="Room 2 — SARSA", page_icon="🧊", layout="wide")
+st.set_page_config(page_title="Room 2 — Collapsing Bridge (SARSA)", page_icon="🏭", layout="wide")
 
 DEFAULTS = TrainRoom2Config()
+
+
+def render_page_header() -> None:
+    st.markdown(
+        """
+        <div style='padding:24px; background:linear-gradient(180deg, rgba(18,22,29,0.95), rgba(8,10,14,0.95)); border:1px solid #2a2e34; border-radius:22px; margin-bottom:20px;'>
+            <h1 style='margin:0; color:#ff8a1a; font-size:2.4rem;'>🌉 Room 2 — The Collapsing Bridge</h1>
+            <p style='margin:10px 0 0 0; color:#cbd5e1; font-size:1.05rem; line-height:1.65;'>SARSA explores an abandoned factory, secures the access card, and chooses the safest path across a collapsing bridge while avoiding slippery pipes and a bottomless abyss.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def init_state():
@@ -37,7 +49,7 @@ init_state()
 
 def render_sidebar() -> TrainRoom2Config:
     with st.sidebar:
-        st.header("SARSA hyperparameters")
+        st.markdown("### Training configuration")
         alpha = st.slider("Learning rate α", 0.01, 1.0, DEFAULTS.alpha, step=0.01)
         gamma = st.slider("Discount γ", 0.0, 0.999, DEFAULTS.gamma, step=0.01)
         epsilon_start = st.slider("Initial ε", 0.0, 1.0, DEFAULTS.epsilon_start, step=0.05)
@@ -47,12 +59,12 @@ def render_sidebar() -> TrainRoom2Config:
         )
 
         st.divider()
-        st.header("Environment")
+        st.markdown("### Environment hazards")
         slip_prob = st.slider("Slip probability", 0.0, 1.0, DEFAULTS.slip_prob, step=0.05)
         max_steps = st.number_input("Max steps / episode", 20, 1000, DEFAULTS.max_steps, step=10)
 
         st.divider()
-        st.header("Training")
+        st.markdown("### Run settings")
         episodes = st.number_input("Episodes", 100, 20000, DEFAULTS.episodes, step=100)
         seed = st.number_input("Seed", 0, 10_000, DEFAULTS.seed, step=1)
 
@@ -85,6 +97,20 @@ def render_metrics(history: list[dict], window: int = 50):
     c3.metric("Final ε", f"{history[-1]['epsilon']:.3f}")
 
 
+def render_room_briefing() -> None:
+    st.markdown("### Mission briefing")
+    st.markdown("- **משימה:** קח את הכרטיס (`K`) ואז פתח את הדלת (`G`).")
+    st.markdown("- **סכנות:** תהום (`P`), רצפה חלקלקה (`~`), וגשר שקורס (`B`).")
+    st.markdown("- **עיקרון:** SARSA לומד להימנע מסיכונים בסביבה חלקלקה.")
+    st.markdown("### Legend")
+    st.markdown("- 🏮 S: start")
+    st.markdown("- 🔑 K: access card")
+    st.markdown("- 🚪 G: locked exit")
+    st.markdown("- 💧 ~: slippery floor")
+    st.markdown("- 🕳 P: abyss")
+    st.markdown("- 🌉 B: collapsing bridge")
+
+
 def render_replay(trajectories: dict):
     st.subheader("Episode replay")
     if not trajectories:
@@ -99,19 +125,16 @@ def render_replay(trajectories: dict):
 
 
 def main():
-    st.title("🌉 Room 2 — The Collapsing Bridge (SARSA)")
-    st.caption("Abandoned factory, unknown model, on-policy TD control.")
+    render_page_header()
 
     cfg, train_clicked = render_sidebar()
 
-    col_grid, col_info = st.columns([1, 1])
+    col_grid, col_info = st.columns([2, 1])
     with col_grid:
         st.subheader("Room layout")
         st.pyplot(render_grid(ROOM2_LAYOUT, title="Room 2: The Collapsing Bridge"))
         st.caption(
-            "S=start · K=access card (must collect before the door opens) · "
-            "G=door/exit · ▩ wall · ~ slippery (leaking pipes) · "
-            "P=abyss · B=bridge (collapses the first time you step off it)"
+            "S=start · K=access card · G=door/exit · ~ slippery floor · P=abyss · B=bridge"
         )
 
     if train_clicked:
@@ -126,6 +149,9 @@ def main():
             st.info("Set your hyperparameters and press **Train Agent**.")
         else:
             render_metrics(st.session_state.history)
+
+        st.divider()
+        render_room_briefing()
 
     if st.session_state.history is not None:
         st.divider()
