@@ -11,6 +11,7 @@ card, and an emergency-green exit door.
 """
 from __future__ import annotations
 
+import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
@@ -29,15 +30,77 @@ CELL_COLORS = {
     "S": "#ff7a1a",  # start -- orange lamp glow
     "G": "#28a862",  # door / exit -- emergency-green glow
 }
-CELL_TEXT_COLORS = {
-    "P": "#8a1f1f",   # dim ember-red label, barely visible in the void
-    "B": "#241505",
-    "K": "#241505",
-    "S": "#241505",
-    "G": "#0a2916",
-}
-CELL_LABELS = {"P": "P", "B": "B", "K": "K", "S": "S", "G": "G"}
 WALL_HATCH_COLOR = "#3a3f46"
+
+
+def _draw_start_icon(ax, cx: float, cy: float) -> None:
+    """Lamp glow: a bright core with radiating rays."""
+    ax.add_patch(plt.Circle((cx, cy), 0.15, facecolor="#fff3d6", edgecolor="none", zorder=5))
+    for angle in range(0, 360, 45):
+        rad = np.radians(angle)
+        x0, y0 = cx + 0.18 * np.cos(rad), cy + 0.18 * np.sin(rad)
+        x1, y1 = cx + 0.32 * np.cos(rad), cy + 0.32 * np.sin(rad)
+        ax.plot([x0, x1], [y0, y1], color="#fff3d6", linewidth=1.6, solid_capstyle="round", zorder=5)
+
+
+def _draw_card_icon(ax, cx: float, cy: float) -> None:
+    """Access card: rounded card outline, magnetic stripe, photo dot."""
+    ax.add_patch(plt.Rectangle((cx - 0.24, cy - 0.16), 0.48, 0.32, facecolor="#fff7e0", edgecolor="#5c4400", linewidth=1.3, zorder=5))
+    ax.add_patch(plt.Rectangle((cx - 0.24, cy + 0.05), 0.48, 0.07, facecolor="#5c4400", edgecolor="none", zorder=6))
+    ax.add_patch(plt.Circle((cx - 0.12, cy - 0.06), 0.05, facecolor="#5c4400", edgecolor="none", zorder=6))
+
+
+def _draw_door_icon(ax, cx: float, cy: float) -> None:
+    """Door: a panel with an offset handle."""
+    ax.add_patch(plt.Rectangle((cx - 0.17, cy - 0.26), 0.34, 0.5, facecolor="#eafff0", edgecolor="#0a2916", linewidth=1.4, zorder=5))
+    ax.add_patch(plt.Circle((cx + 0.09, cy), 0.035, facecolor="#0a2916", edgecolor="none", zorder=6))
+
+
+def _draw_abyss_icon(ax, cx: float, cy: float) -> None:
+    """Bottomless hole: concentric rings fading to black."""
+    for radius, color in [(0.36, "#3a0d0d"), (0.25, "#200606"), (0.13, "#000000")]:
+        ax.add_patch(plt.Circle((cx, cy), radius, facecolor=color, edgecolor="none", zorder=5))
+
+
+def _draw_bridge_icon(ax, cx: float, cy: float) -> None:
+    """Wood planks laid across the cell."""
+    for i, dy in enumerate((-0.3, -0.1, 0.1, 0.3)):
+        ax.add_patch(
+            plt.Rectangle(
+                (cx - 0.38, cy + dy - 0.08),
+                0.76,
+                0.16,
+                facecolor="#7a4a1f" if i % 2 == 0 else "#8a5a2b",
+                edgecolor="#4a2e10",
+                linewidth=0.8,
+                zorder=5,
+            )
+        )
+
+
+def _draw_slip_icon(ax, cx: float, cy: float) -> None:
+    """A couple of droplets, for leaking pipes."""
+    for dx in (-0.15, 0.13):
+        ax.add_patch(
+            plt.Polygon(
+                [(cx + dx, cy + 0.22), (cx + dx - 0.09, cy - 0.06), (cx + dx, cy - 0.18), (cx + dx + 0.09, cy - 0.06)],
+                closed=True,
+                facecolor="#8fe6ee",
+                edgecolor="#1e5f66",
+                linewidth=0.6,
+                zorder=5,
+            )
+        )
+
+
+CELL_ICONS = {
+    "S": _draw_start_icon,
+    "K": _draw_card_icon,
+    "G": _draw_door_icon,
+    "P": _draw_abyss_icon,
+    "B": _draw_bridge_icon,
+    "~": _draw_slip_icon,
+}
 
 
 def _style_dark_axes(ax) -> None:
@@ -144,18 +207,9 @@ def render_grid(
                     linewidth=0.6,
                 )
             )
-            label = CELL_LABELS.get(symbol)
-            if label:
-                ax.text(
-                    c + 0.5,
-                    n_rows - 1 - r + 0.5,
-                    label,
-                    ha="center",
-                    va="center",
-                    fontsize=9,
-                    fontweight="bold",
-                    color=CELL_TEXT_COLORS.get(symbol, TEXT_COLOR),
-                )
+            draw_icon = CELL_ICONS.get(symbol)
+            if draw_icon:
+                draw_icon(ax, c + 0.5, n_rows - 1 - r + 0.5)
 
     if path:
         xs = [c + 0.5 for _, c in path]

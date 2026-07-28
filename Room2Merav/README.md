@@ -106,11 +106,19 @@ PPBPPPPPPP
 
 ![Room 2 layout](room_layout.png)
 
-Rendered in a dark, abandoned-factory palette (`viz.py`): orange lamp glow
-at the start, teal leaking pipes, a bottomless-black abyss, a warm wooden
-bridge plank, a glowing gold access card, and an emergency-green exit door
-— consistent across the grid, the learning-curve panels, and the
-SARSA-vs-Q-Learning comparison plot below.
+Rendered in a dark, abandoned-factory palette (`viz.py`), with every
+special cell drawn as a small hand-built icon rather than a letter — a
+lamp glow at the start, an ID-card pictogram for the access card, a door
+with a handle for the exit, concentric rings fading to black for the
+abyss, wood-plank stripes for the bridge, and droplets for the leaking
+pipes. (Plain text labels were the original design; matplotlib's Agg
+backend can't actually render color emoji glyphs — the color-emoji font
+crashes the renderer outright — so these are vector shapes drawn directly
+with matplotlib patches, not font glyphs.) The same dark palette is
+consistent across the grid, the learning-curve panels, and the
+SARSA-vs-Q-Learning comparison plot below. The Streamlit app (`app.py`)
+mirrors this with a dark sidebar and an emoji-based legend (safe there,
+since the sidebar is rendered by the browser, not matplotlib).
 
 Upper maze (rows 0-5) with the access card tucked in the top-right corner
 — off the direct route, forcing a real detour — a slippery band right at
