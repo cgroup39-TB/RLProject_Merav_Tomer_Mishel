@@ -6,6 +6,8 @@ and reward parameters are fully configurable at runtime from the UI.
 
 from dataclasses import dataclass, field
 
+import numpy as np
+
 
 class Cell:
     EMPTY = "empty"
@@ -14,6 +16,7 @@ class Cell:
     GOAL = "goal"
     TRAP = "trap"
     START = "start"
+    LASER = "laser"
 
 
 class Action:
@@ -26,9 +29,26 @@ ACTION_ARROWS = {Action.UP: "↑", Action.DOWN: "↓", Action.LEFT: "←", Actio
 
 _CLOCKWISE = [Action.UP, Action.RIGHT, Action.DOWN, Action.LEFT]
 
+# Per-cell slip-direction modes: "cw"/"ccw" rotate the intended action;
+# the four cardinal strings always slip toward that fixed direction.
+_FIXED_SLIP_DIRS = {"up": Action.UP, "down": Action.DOWN, "left": Action.LEFT, "right": Action.RIGHT}
+SLIP_DIR_MODES = ["cw", "ccw", "up", "down", "left", "right"]
+SLIP_DIR_LABELS = {
+    "cw": "↻ Rotate 90° clockwise (default)",
+    "ccw": "↺ Rotate 90° counter-clockwise",
+    "up": "↑ Always up",
+    "down": "↓ Always down",
+    "left": "← Always left",
+    "right": "→ Always right",
+}
+
 
 def rotate_clockwise(a):
     return _CLOCKWISE[(_CLOCKWISE.index(a) + 1) % 4]
+
+
+def rotate_counterclockwise(a):
+    return _CLOCKWISE[(_CLOCKWISE.index(a) - 1) % 4]
 
 
 @dataclass
@@ -37,6 +57,8 @@ class GridConfig:
     cols: int = 10
     cells: dict = field(default_factory=dict)          # (r,c) -> Cell.* type, default EMPTY
     cell_rewards: dict = field(default_factory=dict)    # (r,c) -> reward override (paint-time)
+    cell_slip_prob: dict = field(default_factory=dict)  # (r,c) -> slip probability override (SLIPPERY cells)
+    cell_slip_dir: dict = field(default_factory=dict)   # (r,c) -> slip direction mode (see SLIP_DIR_MODES)
     start: tuple = (0, 0)
     goal: tuple = (9, 9)
 
@@ -59,18 +81,22 @@ class GridWorldEnv:
         step_reward=0.0,
         goal_reward=100.0,
         trap_reward=-100.0,
+        laser_reward=-20.0,
         gamma=0.95,
         potential_shaping=False,
         max_steps=500,
+        seed=None,
     ):
         self.cfg = config
         self.slip_prob = slip_prob
         self.step_reward = step_reward
         self.goal_reward = goal_reward
         self.trap_reward = trap_reward
+        self.laser_reward = laser_reward
         self.gamma = gamma
         self.potential_shaping = potential_shaping
         self.max_steps = max_steps
+        self.rng = np.random.default_rng(seed)
 
         self.rows, self.cols = config.rows, config.cols
         self.n_states = self.rows * self.cols
@@ -108,10 +134,17 @@ class GridWorldEnv:
             return self.goal_reward
         if t == Cell.TRAP:
             return self.trap_reward
+        if t == Cell.LASER:
+            return self.laser_reward
         return self.step_reward
 
     def _transition_reward(self, s, s_next):
-        reward = self._base_reward(s_next) if self.is_terminal(s_next) else self._base_reward(s)
+        # Laser cells are non-terminal but still charge their penalty on entry,
+        # same as terminal cells charge their reward on entry.
+        if self.is_terminal(s_next) or self.cfg.cell_type(*s_next) == Cell.LASER:
+            reward = self._base_reward(s_next)
+        else:
+            reward = self._base_reward(s)
         if self.potential_shaping and not self.is_terminal(s):
             reward += self.gamma * self._potential(s_next) - self._potential(s)
         return reward
@@ -124,6 +157,18 @@ class GridWorldEnv:
         if not self.in_bounds(nr, nc) or self.cfg.cell_type(nr, nc) == Cell.WALL:
             return s
         return (nr, nc)
+
+    # ---------- per-cell slip lookups ----------
+    def _slip_prob(self, s):
+        return self.cfg.cell_slip_prob.get(s, self.slip_prob)
+
+    def _slip_outcome_action(self, s, a):
+        mode = self.cfg.cell_slip_dir.get(s, "cw")
+        if mode == "cw":
+            return rotate_clockwise(a)
+        if mode == "ccw":
+            return rotate_counterclockwise(a)
+        return _FIXED_SLIP_DIRS.get(mode, rotate_clockwise(a))
 
     # ---------- known model, for DP ----------
     def get_transition_model(self):
@@ -140,7 +185,8 @@ class GridWorldEnv:
                 continue
             for a in ACTIONS:
                 if self.cfg.cell_type(*s) == Cell.SLIPPERY:
-                    branches = [(1.0 - self.slip_prob, a), (self.slip_prob, rotate_clockwise(a))]
+                    sp = self._slip_prob(s)
+                    branches = [(1.0 - sp, a), (sp, self._slip_outcome_action(s, a))]
                 else:
                     branches = [(1.0, a)]
                 merged = {}
@@ -164,9 +210,8 @@ class GridWorldEnv:
         s = self._state
         real_a = a
         if self.cfg.cell_type(*s) == Cell.SLIPPERY:
-            import random
-            if random.random() < self.slip_prob:
-                real_a = rotate_clockwise(a)
+            if self.rng.random() < self._slip_prob(s):
+                real_a = self._slip_outcome_action(s, a)
         s_next = self._move(s, real_a)
         reward = self._transition_reward(s, s_next)
         done = self.is_terminal(s_next)
@@ -176,11 +221,55 @@ class GridWorldEnv:
 
 
 def default_config(rows=10, cols=10):
-    """Room 1 default layout, matching the earlier fixed-grid version."""
+    """
+    Room 1 "Laser Room" default layout: a metal-wall maze with two routes
+    from start to goal — a direct staircase lined with lasers (short,
+    dangerous) and a perimeter corridor (top row + right column) that stays
+    clear except for two slippery ice patches with distinct probability and
+    slip direction (long, safe). Degrades gracefully at any grid size.
+    """
     cfg = GridConfig(rows=rows, cols=cols, start=(0, 0), goal=(rows - 1, cols - 1))
-    slippery = {(2, 3), (2, 4), (2, 5), (5, 1), (5, 2), (6, 6), (6, 7), (7, 7), (3, 8), (4, 8)}
-    for r, c in slippery:
-        if r < rows and c < cols:
-            cfg.cells[(r, c)] = Cell.SLIPPERY
+
+    for r in range(rows):
+        for c in range(cols):
+            if (r, c) not in (cfg.start, cfg.goal):
+                cfg.cells[(r, c)] = Cell.WALL
+
+    safe_route = {(0, c) for c in range(cols)} | {(r, cols - 1) for r in range(rows)}
+    for cell in safe_route:
+        if cell not in (cfg.start, cfg.goal):
+            cfg.cells[cell] = Cell.EMPTY
+
+    r, c = cfg.start
+    gr, gc = cfg.goal
+    go_right = True
+    staircase = [(r, c)]
+    while (r, c) != (gr, gc):
+        if go_right and c < gc:
+            c += 1
+        elif r < gr:
+            r += 1
+        elif c < gc:
+            c += 1
+        go_right = not go_right
+        staircase.append((r, c))
+    for cell in staircase:
+        if cell in (cfg.start, cfg.goal) or cell in safe_route:
+            continue
+        cfg.cells[cell] = Cell.LASER
+
+    if cols > 3:
+        ice1 = (0, cols // 3)
+        if ice1 not in (cfg.start, cfg.goal):
+            cfg.cells[ice1] = Cell.SLIPPERY
+            cfg.cell_slip_prob[ice1] = 0.15
+            cfg.cell_slip_dir[ice1] = "cw"
+    if rows > 3:
+        ice2 = (2 * rows // 3, cols - 1)
+        if ice2 not in (cfg.start, cfg.goal):
+            cfg.cells[ice2] = Cell.SLIPPERY
+            cfg.cell_slip_prob[ice2] = 0.5
+            cfg.cell_slip_dir[ice2] = "down"
+
     cfg.cells[cfg.goal] = Cell.GOAL
     return cfg
