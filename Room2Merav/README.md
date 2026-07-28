@@ -117,8 +117,10 @@ crashes the renderer outright — so these are vector shapes drawn directly
 with matplotlib patches, not font glyphs.) The same dark palette is
 consistent across the grid, the learning-curve panels, and the
 SARSA-vs-Q-Learning comparison plot below. The Streamlit app (`app.py`)
-mirrors this with a dark sidebar and an emoji-based legend (safe there,
-since the sidebar is rendered by the browser, not matplotlib).
+mirrors this with a dark, icon-labeled sidebar (grouped into SARSA
+hyperparameters / Environment / Training run), an emoji-based legend (safe
+there, since the sidebar is rendered by the browser, not matplotlib), a
+styled header banner, and a "Mission briefing" panel.
 
 Upper maze (rows 0-5) with the access card tucked in the top-right corner
 — off the direct route, forcing a real detour — a slippery band right at
