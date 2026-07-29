@@ -20,6 +20,8 @@ from grid_env import (
 from dp_solver import value_iteration, policy_iteration
 from sarsa_solver import sarsa
 from qlearning_solver import q_learning
+from continuous_env import WarehouseRoom, N_ACTIONS
+from linear_qlearning_solver import Features, train_linear_qlearning, greedy_action
 
 
 st.set_page_config(page_title="Escape Room RL", page_icon="🗝️", layout="wide")
@@ -397,9 +399,70 @@ def inject_room3_css():
     st.html("<style>\n" + "\n".join(rules) + "\n</style>")
 
 
+def inject_chrome_css():
+    """Room 5 has no per-cell grid to style, just the shared lab theme."""
+    st.html(f"<style>\n{CHROME_CSS}\n</style>")
+
+
 # ---------------------------------------------------------------------------
 # sidebar
 # ---------------------------------------------------------------------------
+def render_room5_sidebar():
+    """
+    Room 5 has no grid to paint (the room is continuous, and its obstacles
+    are randomised every episode by design), so its whole params shape is
+    different from the grid rooms' -- it gets its own sidebar rather than
+    threading a second params dict through render_sidebar's grid-room path.
+    """
+    with st.sidebar:
+        st.header("🎮 Game Setup")
+
+        st.subheader("🏭 Warehouse parameters")
+        n_obstacles = st.number_input("Number of crates", 0, 20, 6, key="r5_n_obstacles")
+        lookahead_m = st.slider("Radar range (m)", 0.5, 5.0, 2.0, key="r5_lookahead_m")
+        n_rays = st.slider("Radar rays", 4, 32, 16, key="r5_n_rays")
+        decision_interval = st.slider("Ticks per decision", 5, 50, 25, key="r5_decision_interval")
+        max_seconds = st.slider("Max episode time (s)", 5.0, 60.0, 25.0, key="r5_max_seconds")
+
+        st.divider()
+        st.subheader("Rewards")
+        time_cost = st.number_input("Time cost (per second)", value=-1.0, step=0.5, key="r5_time_cost")
+        progress_reward = st.number_input("Progress bonus (per metre closer)", value=4.0, step=0.5, key="r5_progress_reward")
+        reverse_cost = st.number_input("Reversal penalty", value=-2.0, step=0.5, key="r5_reverse_cost")
+        wall_reward = st.number_input("Wall bump penalty", value=-1.0, step=0.5, key="r5_wall_reward")
+        crash_reward = st.number_input("Crash penalty", value=-50.0, step=5.0, key="r5_crash_reward")
+        goal_reward = st.number_input("Goal reward", value=100.0, step=5.0, key="r5_goal_reward")
+
+        st.divider()
+        st.subheader("Function approximation (tile coding)")
+        n_tilings = st.slider("Tilings", 1, 8, 4, key="r5_n_tilings")
+        tiles = st.slider("Tiles per side", 4, 20, 10, key="r5_tiles")
+        ray_bins = st.slider("Radar bins per ray", 2, 8, 4, key="r5_ray_bins")
+
+        st.divider()
+        st.subheader("Training Hyperparameters")
+        alpha = st.slider("Learning rate α", 0.01, 1.0, 0.3, key="r5_alpha")
+        epsilon = st.slider("Initial ε (exploration)", 0.0, 1.0, 1.0, key="r5_epsilon")
+        epsilon_min = st.slider("Min ε", 0.0, 0.5, 0.05, key="r5_epsilon_min")
+        epsilon_decay = st.slider("ε decay per episode", 0.90, 0.9999, 0.997, key="r5_epsilon_decay", format="%.4f")
+        episodes = st.number_input("Episodes", min_value=100, max_value=5000, value=1500, step=100, key="r5_episodes")
+        seed = st.number_input("Random seed", min_value=0, value=0, step=1, key="r5_seed")
+
+        st.divider()
+        train_clicked = st.button("▶ Train Agent", type="primary", use_container_width=True)
+
+        params = dict(
+            n_obstacles=int(n_obstacles), lookahead_m=lookahead_m, n_rays=int(n_rays),
+            decision_interval=int(decision_interval), max_seconds=max_seconds,
+            time_cost=time_cost, progress_reward=progress_reward, reverse_cost=reverse_cost,
+            wall_reward=wall_reward, crash_reward=crash_reward, goal_reward=goal_reward,
+            n_tilings=int(n_tilings), tiles=int(tiles), ray_bins=int(ray_bins),
+            alpha=alpha, epsilon=epsilon, epsilon_min=epsilon_min,
+            epsilon_decay=epsilon_decay, episodes=int(episodes), seed=int(seed),
+        )
+        return params, train_clicked
+
+
 def render_sidebar(current_room):
     with st.sidebar:
         st.header("🎮 Game Setup")
@@ -695,6 +758,77 @@ def train_room3(params):
         st.session_state.unlocked_room = max(st.session_state.unlocked_room, 5)
 
 
+# ---------------------------------------------------------------------------
+# training + results (Room 5 — semi-gradient Q-Learning, Shifting Warehouse)
+# ---------------------------------------------------------------------------
+def train_room5(params):
+    env = WarehouseRoom(
+        n_obstacles=params["n_obstacles"],
+        lookahead_m=params["lookahead_m"],
+        n_rays=params["n_rays"],
+        decision_interval=params["decision_interval"],
+        max_seconds=params["max_seconds"],
+        time_cost=params["time_cost"],
+        goal_reward=params["goal_reward"],
+        wall_reward=params["wall_reward"],
+        crash_reward=params["crash_reward"],
+        progress_reward=params["progress_reward"],
+        reverse_cost=params["reverse_cost"],
+        seed=params["seed"],
+    )
+    features = Features(
+        arena_size=10.0,
+        n_rays=env.n_rays,
+        lookahead_m=env.lookahead_m,
+        n_tilings=params["n_tilings"],
+        tiles=params["tiles"],
+        ray_bins=params["ray_bins"],
+    )
+    weights, info = train_linear_qlearning(
+        env, features, N_ACTIONS,
+        episodes=params["episodes"], alpha=params["alpha"], gamma=0.995,
+        epsilon=params["epsilon"], epsilon_min=params["epsilon_min"],
+        epsilon_decay=params["epsilon_decay"], seed=params["seed"],
+    )
+
+    # The whole point of this room is generalisation, so the reported run
+    # is evaluated greedily on a layout the training loop never saw --
+    # a different obstacle seed, not one of the per-episode training draws.
+    eval_env = WarehouseRoom(
+        n_obstacles=params["n_obstacles"],
+        lookahead_m=params["lookahead_m"],
+        n_rays=params["n_rays"],
+        decision_interval=params["decision_interval"],
+        max_seconds=params["max_seconds"],
+        time_cost=params["time_cost"],
+        goal_reward=params["goal_reward"],
+        wall_reward=params["wall_reward"],
+        crash_reward=params["crash_reward"],
+        progress_reward=params["progress_reward"],
+        reverse_cost=params["reverse_cost"],
+        seed=params["seed"] + 999_983,
+    )
+    obs = eval_env.reset()
+    active = features.active(obs)
+    path = [(eval_env.x, eval_env.y)]
+    total_reward = 0.0
+    solved = False
+    for _ in range(eval_env.max_decisions):
+        a = greedy_action(weights, active)
+        obs, r, done, _ = eval_env.step(a)
+        active = features.active(obs)
+        total_reward += r
+        path.append((eval_env.x, eval_env.y))
+        if done:
+            solved = eval_env.escaped()
+            break
+
+    st.session_state.results[5] = dict(
+        env=eval_env, weights=weights, info=info,
+        path=path, total_reward=total_reward, solved=solved,
+    )
+
+
 def plot_result(res):
     env = res["env"]
     V = res["V"].reshape(env.rows, env.cols)
@@ -878,6 +1012,68 @@ def render_room3_results():
     st.pyplot(plot_learning_curve(res["info"]))
 
 
+def plot_room5_result(res):
+    env = res["env"]
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.add_patch(plt.Rectangle((0, 0), 10, 10, fill=False, edgecolor="black", linewidth=1.5))
+
+    for ox, oy in env.obstacles:
+        half = env.obstacle_size / 2
+        ax.add_patch(plt.Rectangle((ox - half, oy - half), env.obstacle_size, env.obstacle_size, color="black"))
+
+    goal_x, goal_y = env.goal
+    ax.add_patch(plt.Circle((goal_x, goal_y), env.goal_radius, color="#35ff8a", alpha=0.35))
+    ax.text(goal_x, goal_y, "G", ha="center", va="center", color="darkgreen", fontweight="bold")
+
+    start_x, start_y = env.start
+    ax.text(start_x, start_y, "S", ha="center", va="center", color="lime", fontweight="bold",
+            bbox=dict(boxstyle="circle", facecolor="black", edgecolor="lime"))
+
+    xs = [p[0] for p in res["path"]]
+    ys = [p[1] for p in res["path"]]
+    ax.plot(xs, ys, color="orange", linewidth=2, zorder=4)
+    ax.plot(xs[-1], ys[-1], marker="o", markersize=10, color="orange", markeredgecolor="black", zorder=5)
+
+    ax.set_xlim(-0.5, 10.5)
+    ax.set_ylim(-0.5, 10.5)
+    ax.set_aspect("equal")
+    ax.set_xticks([]); ax.set_yticks([])
+    plt.tight_layout()
+    return fig
+
+
+def render_room5_results():
+    st.subheader("📊 Results")
+    res = st.session_state.results.get(5)
+    if res is None:
+        st.info("Set your parameters and press **Train Agent**.")
+        return
+
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        st.pyplot(plot_room5_result(res))
+        st.caption(
+            "Evaluated greedily on a crate layout the training loop never saw -- "
+            "this is the generalisation test the room is built around."
+        )
+    with c2:
+        st.metric("Reached goal?", "✅ Yes" if res["solved"] else "❌ No")
+        st.metric("Episode reward", f"{res['total_reward']:.1f}")
+        st.metric("Decisions to exit", len(res["path"]) - 1)
+        st.divider()
+        info = res["info"]
+        st.write(f"**{info['algorithm']}**:", info["episodes"], "episodes trained")
+        st.write("Final ε (exploration):", f"{info['final_epsilon']:.3f}")
+        last = info["reward_history"][-50:]
+        st.write("Avg reward (last 50 ep):", f"{sum(last) / len(last):.1f}")
+        if res["solved"]:
+            st.success("🏆 Every built room cleared!")
+
+    st.divider()
+    st.subheader("📈 Learning curve")
+    st.pyplot(plot_learning_curve(res["info"]))
+
+
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
@@ -928,6 +1124,21 @@ ROOM_HEADERS = {
         "continuation, so it plans the full battery → blue → red → exit route even "
         "while it's still bumping into walls.",
     ),
+    5: (
+        "### 🏭 Room 5 — The Shifting Warehouse",
+        "The last built sector is the loading warehouse, and its stacking robots "
+        "never stopped working: 0.5-metre **crates** stand somewhere new at the "
+        "start of every single run. There's no grid to memorise here, and no fixed "
+        "map to plan against — the room is 10x10 **metres** of open floor, and you "
+        "can't even see it: all you get is a short-range **radar**, a handful of "
+        "distance readings around you. A table of Q-values has no row for "
+        "'standing at (x=3.7, y=8.1)', so a **linear model** takes its place — "
+        "weights over tile-coded position and speed, plus radar-distance bins, "
+        "learned with semi-gradient Q-Learning. Learning a *route* is useless "
+        "here; the only thing worth learning is a *rule* about what the radar "
+        "says — and that's what lets it reach the exit in a crate layout it has "
+        "never seen before.",
+    ),
 }
 
 
@@ -942,11 +1153,26 @@ def render_room_header(room):
 
 def main():
     room = st.session_state.current_room
-    inject_room3_css() if room == 3 else inject_grid_css()
+    if room == 3:
+        inject_room3_css()
+    elif room in (1, 2):
+        inject_grid_css()
+    else:
+        inject_chrome_css()
     st.title("🗝️ Escape Room RL")
     st.caption("Design your environment, choose an algorithm, and watch the agent escape.")
     render_room_nav()
     st.divider()
+
+    if room == 5:
+        params, train_clicked = render_room5_sidebar()
+        render_room_header(room)
+        if train_clicked:
+            with st.spinner(f"Training for {params['episodes']} episodes..."):
+                train_room5(params)
+            st.rerun()
+        render_room5_results()
+        return
 
     params, train_clicked = render_sidebar(room)
 

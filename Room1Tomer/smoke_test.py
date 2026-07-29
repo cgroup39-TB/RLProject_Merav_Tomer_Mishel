@@ -196,6 +196,25 @@ def main():
         print("  solved:", res and res["solved"], "| steps:", res and len(res["path"]) - 1)
         print("  unlocked_room:", at.session_state.unlocked_room)
 
+    # ---- 9. navigate to Room 5 and train (linear Q-Learning), small budget -
+    nav5 = [b for b in at.button if b.key == "room_nav_5"]
+    if not nav5:
+        print("  !! Room 5 nav button not found")
+        ok = False
+    else:
+        nav5[0].click().run()
+        ok &= show(at, "9. navigate to Room 5")
+        print("  current_room:", at.session_state.current_room)
+
+        at.session_state.r5_episodes = 50
+        at.run()
+        train = [b for b in at.button if "Train" in (b.label or "")]
+        if train:
+            train[0].click().run()
+            ok &= show(at, "9b. train Room 5 (linear Q-Learning, 50 episodes)")
+            res = at.session_state.results.get(5)
+            print("  solved:", res and res["solved"], "| steps:", res and len(res["path"]) - 1)
+
     print("\n" + ("ALL CHECKS PASSED" if ok else "FAILURES FOUND"))
     return 0 if ok else 1
 
