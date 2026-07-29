@@ -1,0 +1,132 @@
+"""Training loop for Room 2 (SARSA).
+
+Runs the agent against Room 2's environment, logs per-episode metrics
+(return, steps, epsilon, success) for the learning-curve plots, and saves
+full trajectories of a few representative episodes (first / middle / last)
+so the app can replay them afterward.
+"""
+from __future__ import annotations
+
+import json
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Optional
+
+import numpy as np
+
+from grid_env import CellOverride
+from sarsa_agent import SARSAAgent, SARSAConfig
+from room2_env import make_room2_env
+
+
+@dataclass
+class TrainRoom2Config:
+    # Defaults are the best config found by hyperparam_sweep.py (see
+    # sweep_results.csv): 84% greedy success at ~41 steps, converging by
+    # ~episode 336. The bridge is itself a slippery cell (not a one-time
+    # safe crossing), so every episode's single mandatory bridge-exit move
+    # carries an irreducible slip_prob (0.2) chance of failure -- capping
+    # the achievable success rate at roughly 1 - slip_prob = ~80%, not
+    # 100%. 84% here is consistent with that ceiling within sampling
+    # noise (200 eval episodes).
+    episodes: int = 3000
+    max_steps: int = 200
+    alpha: float = 0.2
+    gamma: float = 0.95
+    epsilon_start: float = 1.0
+    epsilon_min: float = 0.05
+    epsilon_decay: float = 0.99
+    slip_prob: float = 0.2
+    seed: Optional[int] = 0
+    results_dir: str = "results/room2"
+
+
+def _episodes_to_record(n_episodes: int) -> set[int]:
+    if n_episodes <= 0:
+        return set()
+    picks = {0, n_episodes // 2, n_episodes - 1}
+    return {p for p in picks if 0 <= p < n_episodes}
+
+
+def train(cfg: TrainRoom2Config, cell_overrides: dict[tuple[int, int], CellOverride] | None = None):
+    """cell_overrides is a live-editor concern (see app.py's grid editor),
+    not a persisted hyperparameter, so it's a separate argument rather
+    than a TrainRoom2Config field -- it has tuple keys and dataclass
+    values, which json.dumps (used by _save_results) can't serialize.
+    """
+    env = make_room2_env(
+        slip_prob=cfg.slip_prob, max_steps=cfg.max_steps, seed=cfg.seed, cell_overrides=cell_overrides
+    )
+    agent = SARSAAgent(
+        SARSAConfig(
+            n_states=env.n_states,
+            n_actions=env.n_actions,
+            alpha=cfg.alpha,
+            gamma=cfg.gamma,
+            epsilon_start=cfg.epsilon_start,
+            epsilon_min=cfg.epsilon_min,
+            epsilon_decay=cfg.epsilon_decay,
+            seed=cfg.seed,
+        )
+    )
+
+    record_episodes = _episodes_to_record(cfg.episodes)
+    history = []
+    trajectories = {}
+
+    for ep in range(cfg.episodes):
+        state, _ = env.reset()
+        action = agent.select_action(state)
+        record = ep in record_episodes
+        traj = [{"state": state, "action": None, "reward": None}] if record else None
+
+        total_reward = 0.0
+        steps = 0
+        terminated = truncated = False
+        last_reward = 0.0
+
+        while not (terminated or truncated):
+            next_state, reward, terminated, truncated, info = env.step(action)
+            next_action = agent.select_action(next_state)
+            agent.update(state, action, reward, next_state, next_action, terminated)
+
+            if record:
+                traj[-1]["action"] = action
+                traj[-1]["reward"] = reward
+                traj.append({"state": next_state, "action": None, "reward": None})
+
+            state, action = next_state, next_action
+            total_reward += reward
+            last_reward = reward
+            steps += 1
+
+        if record:
+            trajectories[ep] = traj
+
+        agent.decay_epsilon()
+        history.append(
+            {
+                "episode": ep,
+                "return": total_reward,
+                "steps": steps,
+                "epsilon": agent.epsilon,
+                "success": bool(terminated and last_reward > 0),
+            }
+        )
+
+    _save_results(cfg, agent, history, trajectories)
+    return agent, history, trajectories
+
+
+def _save_results(cfg: TrainRoom2Config, agent: SARSAAgent, history: list, trajectories: dict) -> None:
+    out_dir = Path(cfg.results_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    np.save(out_dir / "q_table.npy", agent.q)
+    (out_dir / "history.json").write_text(json.dumps(history))
+    (out_dir / "trajectories.json").write_text(json.dumps(trajectories))
+    (out_dir / "config.json").write_text(json.dumps(asdict(cfg)))
+
+
+if __name__ == "__main__":
+    train(TrainRoom2Config())
