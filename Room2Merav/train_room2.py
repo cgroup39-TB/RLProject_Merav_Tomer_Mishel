@@ -14,6 +14,7 @@ from typing import Optional
 
 import numpy as np
 
+from grid_env import CellOverride
 from sarsa_agent import SARSAAgent, SARSAConfig
 from room2_env import make_room2_env
 
@@ -47,8 +48,15 @@ def _episodes_to_record(n_episodes: int) -> set[int]:
     return {p for p in picks if 0 <= p < n_episodes}
 
 
-def train(cfg: TrainRoom2Config):
-    env = make_room2_env(slip_prob=cfg.slip_prob, max_steps=cfg.max_steps, seed=cfg.seed)
+def train(cfg: TrainRoom2Config, cell_overrides: dict[tuple[int, int], CellOverride] | None = None):
+    """cell_overrides is a live-editor concern (see app.py's grid editor),
+    not a persisted hyperparameter, so it's a separate argument rather
+    than a TrainRoom2Config field -- it has tuple keys and dataclass
+    values, which json.dumps (used by _save_results) can't serialize.
+    """
+    env = make_room2_env(
+        slip_prob=cfg.slip_prob, max_steps=cfg.max_steps, seed=cfg.seed, cell_overrides=cell_overrides
+    )
     agent = SARSAAgent(
         SARSAConfig(
             n_states=env.n_states,

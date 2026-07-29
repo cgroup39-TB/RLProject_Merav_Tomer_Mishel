@@ -19,6 +19,17 @@ Layout symbols:
 room2_env.py configures the layout and reward shaping; this module only
 implements the movement dynamics.
 
+Per-cell overrides
+    Beyond the fixed symbols above, any individual cell can be customized
+    via `GridWorldConfig.cell_overrides` (see CellOverride below) to be
+    slippery with its own probability, to grant a reward on every visit,
+    or to end the episode with its own reward -- independent of what
+    symbol that cell has in the layout. This is how the interactive grid
+    editor in app.py lets you paint arbitrary custom cells onto the room
+    (mirroring Room 1's paintable Cell/GridConfig system) without needing
+    a new layout symbol for every combination. Overrides always take
+    priority over the fixed symbol behavior.
+
 State
     Whether G ends the episode depends on has_key -- the same (row, col)
     cell means something different depending on whether the key has
@@ -29,11 +40,13 @@ State
     (row, col, has_key), doubling the state space to n_rows*n_cols*2. The
     bridge needs no equivalent flag: unlike a "used once" mechanic, its
     risk doesn't depend on history, so it doesn't have to be part of the
-    state.
+    state. Per-cell reward/terminal overrides don't need state either --
+    a repeatable reward doesn't depend on history, and a terminal cell's
+    episode-ending nature makes "have I been here before" moot.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
@@ -48,6 +61,20 @@ _DELTA = {
 
 
 @dataclass
+class CellOverride:
+    """Custom per-cell behavior, layered on top of a cell's layout symbol.
+
+    All three are independent and optional -- a cell can be slippery *and*
+    grant a reward, for instance. Leave a field as None to fall back to
+    the cell's ordinary symbol-based behavior for that aspect.
+    """
+
+    slip_prob: Optional[float] = None       # "slippery, and how (likely)"
+    reward: Optional[float] = None          # "a reward" -- granted every visit, not terminal
+    terminal_reward: Optional[float] = None  # "a terminal state" -- ends the episode with this reward
+
+
+@dataclass
 class GridWorldConfig:
     layout: tuple[str, ...]
     slip_prob: float = 0.2
@@ -59,6 +86,7 @@ class GridWorldConfig:
     goal_min_reward: float = 20.0
     max_steps: int = 200
     seed: Optional[int] = None
+    cell_overrides: dict[tuple[int, int], CellOverride] = field(default_factory=dict)
 
 
 class GridWorld:
@@ -151,20 +179,28 @@ class GridWorld:
             raise ValueError(f"action must be in [0, 3], got {action}")
 
         current_cell = self.grid[self.state[0]][self.state[1]]
+        current_override = self.cfg.cell_overrides.get(self.state)
+        slip_prob = current_override.slip_prob if current_override and current_override.slip_prob is not None else (
+            self.cfg.slip_prob if current_cell in ("~", "B") else None
+        )
         slipped = False
         actual_action = action
-        if current_cell in ("~", "B") and self.rng.random() < self.cfg.slip_prob:
+        if slip_prob is not None and self.rng.random() < slip_prob:
             actual_action = self.rng.choice(self._perpendicular_actions(action))
             slipped = True
 
         self.state = self._attempt_move(self.state, actual_action)
         self.steps_taken += 1
         landed_cell = self.grid[self.state[0]][self.state[1]]
+        landed_override = self.cfg.cell_overrides.get(self.state)
 
         terminated = False
         picked_key = False
         reward = self.cfg.step_reward
-        if landed_cell == "P":
+        if landed_override is not None and landed_override.terminal_reward is not None:
+            reward = landed_override.terminal_reward
+            terminated = True
+        elif landed_cell == "P":
             reward = self.cfg.pit_reward
             terminated = True
         elif landed_cell == "K" and not self.has_key:
@@ -175,6 +211,9 @@ class GridWorld:
             bonus = self.cfg.goal_base_reward - self.cfg.goal_decay_per_step * self.steps_taken
             reward = max(bonus, self.cfg.goal_min_reward)
             terminated = True
+
+        if not terminated and landed_override is not None and landed_override.reward is not None:
+            reward += landed_override.reward
 
         truncated = (not terminated) and self.steps_taken >= self.cfg.max_steps
         info = {

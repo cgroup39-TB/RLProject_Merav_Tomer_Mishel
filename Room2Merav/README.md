@@ -219,6 +219,34 @@ trajectory (state/action/reward per step) so you can step through them
 afterward — compare the wandering, undertrained Episode 0 against the
 converged final episode.
 
+## Grid editor: per-cell overrides
+
+Mirroring Room 1's paintable `Cell`/`GridConfig` system, any individual
+cell (except `S`, `K`, `G`, which are structurally tied to the state
+machine) can be customized independent of its layout symbol, via
+`grid_env.CellOverride`:
+
+- **Slippery, and how** — `slip_prob: float` gives that specific cell its
+  own slip probability, overriding the global `slip_prob` (and applying
+  even to a plain `.` cell that wasn't slippery at all).
+- **A reward** — `reward: float` grants that value on every visit
+  (non-terminal, repeatable — no extra state needed, unlike the key).
+- **A terminal state** — `terminal_reward: float` ends the episode with
+  that reward the moment the cell is reached, positive or negative —
+  generalizing both the abyss (fixed at -20) and the goal (fixed,
+  key-gated) into an arbitrary custom ending.
+
+All three are independent — a cell can be slippery *and* grant a reward,
+for instance — and overrides always take priority over the cell's base
+symbol behavior. `app.py`'s "🎨 Grid editor" expander provides a paint-tool
+UI for this: pick a tool (slippery/reward/terminal/clear), set its value,
+then click cells in the 10x10 grid to apply it — the room preview and the
+episode replay both mark overridden cells with small corner badges (cyan
+for slippery, green for reward, red for terminal). Training passes the
+current overrides straight into `make_room2_env(cell_overrides=...)`, so
+whatever's painted when you hit **Train Agent** is what the agent learns
+against.
+
 ## Random layout variants
 
 `room2_env.generate_random_layout()` scatters walls/slippery cells/pits

@@ -14,6 +14,7 @@ matplotlib.use("Agg")
 
 import streamlit as st
 
+from grid_env import CellOverride
 from room2_env import ROOM2_LAYOUT
 from train_room2 import TrainRoom2Config, train
 from viz import BG_COLOR, GRID_LINE_COLOR, PANEL_COLOR, TEXT_COLOR, plot_learning_curves, render_grid, render_episode_step
@@ -82,9 +83,52 @@ def init_state():
     st.session_state.history = None
     st.session_state.trajectories = None
     st.session_state.trained_cfg = None
+    st.session_state.cell_overrides = {}
+    st.session_state.paint_tool = "none"
 
 
 init_state()
+
+# S/K/G are structurally tied to the state machine (start position, the
+# has_key flag, the key-gated exit) -- painting over them would silently
+# break the room, so the grid editor refuses to touch them.
+PROTECTED_CELLS = {
+    (r, c) for r, row in enumerate(ROOM2_LAYOUT) for c, ch in enumerate(row) if ch in ("S", "K", "G")
+}
+
+PAINT_TOOLS = {
+    "none": "🚫 None (inspect only)",
+    "slippery": "💧 Slippery (custom %)",
+    "reward": "⭐ Reward (custom value)",
+    "terminal": "☠️ Terminal (custom value)",
+    "clear": "🧹 Clear override",
+}
+
+
+def paint_cell(r: int, c: int) -> None:
+    if (r, c) in PROTECTED_CELLS:
+        st.toast("Can't override the start, key, or door cells.", icon="🚫")
+        return
+    tool = st.session_state.paint_tool
+    if tool == "none":
+        return
+    if tool == "clear":
+        st.session_state.cell_overrides.pop((r, c), None)
+        return
+    existing = st.session_state.cell_overrides.get((r, c), CellOverride())
+    if tool == "slippery":
+        existing = CellOverride(
+            slip_prob=st.session_state.paint_slip_prob, reward=existing.reward, terminal_reward=existing.terminal_reward
+        )
+    elif tool == "reward":
+        existing = CellOverride(
+            slip_prob=existing.slip_prob, reward=st.session_state.paint_reward_value, terminal_reward=existing.terminal_reward
+        )
+    elif tool == "terminal":
+        existing = CellOverride(
+            slip_prob=existing.slip_prob, reward=existing.reward, terminal_reward=st.session_state.paint_terminal_value
+        )
+    st.session_state.cell_overrides[(r, c)] = existing
 
 
 LEGEND_ITEMS = [
@@ -105,6 +149,67 @@ def render_legend() -> None:
         for icon, text in LEGEND_ITEMS
     )
     st.markdown(rows, unsafe_allow_html=True)
+
+
+BASE_SYMBOL_ICON = {"S": "🚩", "K": "🔑", "G": "🚪", "#": "🧱", "P": "⚫", "B": "🪵", "~": "💧", ".": "·"}
+
+
+def cell_button_label(r: int, c: int) -> str:
+    label = BASE_SYMBOL_ICON.get(ROOM2_LAYOUT[r][c], "·")
+    override = st.session_state.cell_overrides.get((r, c))
+    if override is None:
+        return label
+    parts = [label]
+    if override.slip_prob is not None:
+        parts.append(f"💧{override.slip_prob:.0%}")
+    if override.reward is not None:
+        parts.append(f"+{override.reward:g}" if override.reward >= 0 else f"{override.reward:g}")
+    if override.terminal_reward is not None:
+        parts.append(f"☠{override.terminal_reward:g}")
+    return "\n".join(parts)
+
+
+def render_grid_editor() -> None:
+    st.markdown("### 🎨 Grid editor")
+    st.caption(
+        "Customize any cell (except start/key/door): make it slippery with its own "
+        "probability, give it a repeatable reward, or make it a terminal state with "
+        "its own reward — independent of the room's base layout."
+    )
+
+    tool = st.radio(
+        "Paint tool",
+        options=list(PAINT_TOOLS.keys()),
+        format_func=lambda t: PAINT_TOOLS[t],
+        key="paint_tool",
+        horizontal=True,
+    )
+    if tool == "slippery":
+        st.slider("Slip probability to paint", 0.0, 1.0, 0.2, step=0.05, key="paint_slip_prob")
+    elif tool == "reward":
+        st.number_input("Reward value to paint (every visit)", value=5.0, step=1.0, key="paint_reward_value")
+    elif tool == "terminal":
+        st.number_input("Terminal reward to paint (ends the episode)", value=-20.0, step=5.0, key="paint_terminal_value")
+
+    for r in range(10):
+        cols = st.columns(10)
+        for c in range(10):
+            with cols[c]:
+                st.button(
+                    cell_button_label(r, c),
+                    key=f"paint_{r}_{c}",
+                    on_click=paint_cell,
+                    args=(r, c),
+                    use_container_width=True,
+                    disabled=(r, c) in PROTECTED_CELLS,
+                )
+
+    if st.session_state.cell_overrides:
+        c1, c2 = st.columns([3, 1])
+        c1.caption(f"{len(st.session_state.cell_overrides)} custom cell(s) painted.")
+        if c2.button("Clear all", use_container_width=True):
+            st.session_state.cell_overrides = {}
+            st.rerun()
 
 
 def render_sidebar() -> TrainRoom2Config:
@@ -179,7 +284,7 @@ def render_replay(trajectories: dict):
     chosen = st.selectbox("Pick a recorded episode", ep_keys, format_func=lambda e: labels[e])
     trajectory = trajectories[chosen]
     step = st.slider("Step", 0, len(trajectory) - 1, len(trajectory) - 1)
-    st.pyplot(render_episode_step(ROOM2_LAYOUT, trajectory, step))
+    st.pyplot(render_episode_step(ROOM2_LAYOUT, trajectory, step, cell_overrides=st.session_state.cell_overrides))
 
 
 def main():
@@ -190,12 +295,21 @@ def main():
     col_grid, col_info = st.columns([2, 1])
     with col_grid:
         st.subheader("Room layout")
-        st.pyplot(render_grid(ROOM2_LAYOUT, title="Room 2: The Collapsing Bridge"))
+        st.pyplot(
+            render_grid(
+                ROOM2_LAYOUT,
+                title="Room 2: The Collapsing Bridge",
+                cell_overrides=st.session_state.cell_overrides,
+            )
+        )
         st.caption("See the 🗺️ Legend in the sidebar for what each icon means.")
+
+    with st.expander("🎨 Grid editor — customize any cell", expanded=False):
+        render_grid_editor()
 
     if train_clicked:
         with st.spinner(f"Training SARSA for {cfg.episodes} episodes..."):
-            _, history, trajectories = train(cfg)
+            _, history, trajectories = train(cfg, cell_overrides=st.session_state.cell_overrides)
         st.session_state.history = history
         st.session_state.trajectories = trajectories
         st.session_state.trained_cfg = cfg

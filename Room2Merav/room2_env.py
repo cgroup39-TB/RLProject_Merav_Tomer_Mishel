@@ -71,7 +71,7 @@ from typing import Optional
 
 import numpy as np
 
-from grid_env import GridWorld, GridWorldConfig
+from grid_env import CellOverride, GridWorld, GridWorldConfig
 
 BASE_ROOM2_LAYOUT = (
     "S..#..#..K",
@@ -198,9 +198,15 @@ def make_room2_env(
     max_steps: int = 200,
     seed: Optional[int] = None,
     layout: tuple[str, ...] | None = None,
+    cell_overrides: dict[tuple[int, int], CellOverride] | None = None,
 ) -> GridWorld:
     """Build Room 2's environment. All reward/slip knobs are exposed here
     so training code can sweep hyperparameters without touching the layout.
+
+    cell_overrides lets any individual cell be customized (slippery with
+    its own probability, a repeatable reward, or a terminal state with its
+    own reward) independent of its layout symbol -- see grid_env.py's
+    CellOverride and the interactive grid editor in app.py.
     """
     config = GridWorldConfig(
         layout=ROOM2_LAYOUT if layout is None else layout,
@@ -213,5 +219,6 @@ def make_room2_env(
         goal_min_reward=goal_min_reward,
         max_steps=max_steps,
         seed=seed,
+        cell_overrides=cell_overrides or {},
     )
     return GridWorld(config)

@@ -191,15 +191,50 @@ def trajectory_to_positions(trajectory: list[dict], n_cols: int = 10) -> list[tu
     return positions
 
 
+OVERRIDE_BADGE_COLORS = {
+    "slip_prob": "#5fd0ff",       # cyan -- matches the slippery droplet theme
+    "reward": "#7cd992",          # green -- a bonus
+    "terminal_reward": "#ff5f5f",  # red -- ends the episode
+}
+
+
+def _draw_override_badges(ax, cx: float, cy: float, override) -> None:
+    """Small corner squares marking which per-cell overrides are active."""
+    active = [
+        key
+        for key in ("slip_prob", "reward", "terminal_reward")
+        if getattr(override, key, None) is not None
+    ]
+    for i, key in enumerate(active):
+        ax.add_patch(
+            plt.Rectangle(
+                (cx - 0.48 + i * 0.14, cy + 0.34),
+                0.12,
+                0.12,
+                facecolor=OVERRIDE_BADGE_COLORS[key],
+                edgecolor="#0d0f12",
+                linewidth=0.4,
+                zorder=7,
+            )
+        )
+
+
 def render_grid(
     layout: tuple[str, ...],
     path: list[tuple[int, int]] | None = None,
     agent_pos: tuple[int, int] | None = None,
     title: str = "",
+    cell_overrides: dict | None = None,
 ) -> Figure:
-    """Static render of the grid, with an optional traversed path and agent marker."""
+    """Static render of the grid, with an optional traversed path and agent marker.
+
+    cell_overrides (optional) marks cells with a custom slip probability,
+    reward, and/or terminal state (see grid_env.CellOverride) with small
+    corner badges, independent of the cell's base layout symbol.
+    """
     n_rows = len(layout)
     n_cols = len(layout[0])
+    cell_overrides = cell_overrides or {}
 
     fig, ax = plt.subplots(figsize=(5, 5), facecolor=BG_COLOR)
     for r in range(n_rows):
@@ -221,6 +256,9 @@ def render_grid(
             draw_icon = CELL_ICONS.get(symbol)
             if draw_icon:
                 draw_icon(ax, c + 0.5, n_rows - 1 - r + 0.5)
+            override = cell_overrides.get((r, c))
+            if override is not None:
+                _draw_override_badges(ax, c + 0.5, n_rows - 1 - r + 0.5, override)
 
     if path:
         xs = [c + 0.5 for _, c in path]
@@ -254,7 +292,13 @@ def render_grid(
     return fig
 
 
-def render_episode_step(layout: tuple[str, ...], trajectory: list[dict], step_index: int, n_cols: int = 10) -> Figure:
+def render_episode_step(
+    layout: tuple[str, ...],
+    trajectory: list[dict],
+    step_index: int,
+    n_cols: int = 10,
+    cell_overrides: dict | None = None,
+) -> Figure:
     """Render the grid with the path walked up to (and agent at) step_index."""
     positions = trajectory_to_positions(trajectory, n_cols=n_cols)
     step_index = max(0, min(step_index, len(positions) - 1))
@@ -263,4 +307,5 @@ def render_episode_step(layout: tuple[str, ...], trajectory: list[dict], step_in
         path=positions[: step_index + 1],
         agent_pos=positions[step_index],
         title=f"Step {step_index} / {len(positions) - 1}",
+        cell_overrides=cell_overrides,
     )
