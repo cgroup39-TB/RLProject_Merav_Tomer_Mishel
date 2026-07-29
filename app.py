@@ -29,11 +29,16 @@ ROOT = Path(__file__).parent
 ROOMS = [
     {"id": 1, "name": "The Laser Room", "subtitle": "Dynamic Programming", "dir": "Room1Tomer", "icon": "🔴"},
     {"id": 2, "name": "The Collapsing Bridge", "subtitle": "SARSA", "dir": "Room2Merav", "icon": "🌉"},
-    {"id": 3, "name": "Q-Learning", "subtitle": "coming soon", "dir": None, "icon": "❓"},
+    {"id": 3, "name": "The Energy Room", "subtitle": "Q-Learning", "dir": "Room1Tomer", "icon": "⚡"},
     {"id": 4, "name": "The Drone Room", "subtitle": "Function Approximation (DQN)", "dir": "Room4Tomer", "icon": "🚁"},
-    {"id": 5, "name": "Dynamic Obstacles", "subtitle": "bonus — coming soon", "dir": None, "icon": "❓"},
+    {"id": 5, "name": "The Shifting Warehouse", "subtitle": "Dynamic Obstacles (bonus)", "dir": "Room1Tomer", "icon": "🏭"},
 ]
 ROOMS_BY_ID = {r["id"]: r for r in ROOMS}
+
+# Rooms 1, 3 and 5 all live inside Room1Tomer/app.py (its own internal
+# multi-room experience, sharing one grid engine/UI); enter_room() tells it
+# which of its own rooms to show via "_embedded_room" rather than pointing
+# three different ids at three different folders.
 
 # Module names that different rooms define independently (e.g. both
 # Room1Tomer and Room2Merav have their own unrelated grid_env.py) --
@@ -41,7 +46,8 @@ ROOMS_BY_ID = {r["id"]: r for r in ROOMS}
 # re-resolves against its own folder instead of a previous room's cached
 # module object.
 VOLATILE_MODULES = [
-    "grid_env", "dp_solver", "sarsa_solver", "smoke_test",
+    "grid_env", "dp_solver", "sarsa_solver", "qlearning_solver",
+    "continuous_env", "linear_qlearning_solver", "smoke_test",
     "room2_env", "sarsa_agent", "train_room2", "viz",
     "drone_env", "dqn_solver", "flight_canvas",
 ]
@@ -81,6 +87,9 @@ def room_solved(room_id):
     if room_id == 4:
         res = st.session_state.get("results", {}).get(4)
         return bool(res and res.get("after", {}).get("solved"))
+    if room_id in (3, 5):
+        res = st.session_state.get("results", {}).get(room_id)
+        return bool(res and res.get("solved"))
     return False
 
 
@@ -106,6 +115,9 @@ def enter_room(room_id):
                 pass  # any other transient widget-instance key -- harmless to drop
     st.session_state["_active_room"] = room_id
     st.session_state["_embedded"] = True  # tells the room's app.py to skip its own set_page_config
+    # For rooms sharing a folder with others (Room1Tomer hosts ids 1/3/5),
+    # tells that app.py which of its own internal rooms to render.
+    st.session_state["_embedded_room"] = room_id
 
 
 def run_room(room_id):
