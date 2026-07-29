@@ -6,26 +6,30 @@ Layout symbols:
     K   key (exactly one) -- must be collected before G will end the
         episode
     #   wall (impassable -- factory machinery, pipes, etc.)
-    ~   slippery floor (leaking pipes): the action taken may slip to a
-        perpendicular direction
+    ~   slippery cell: with probability slip_prob, the action taken slips
+        to a perpendicular direction instead of the intended one
     P   abyss (optional): terminates the episode with a penalty
-    B   bridge (exactly one): the only safe crossing of the abyss -- but it
-        collapses the first time the agent steps off it, so it can only be
-        crossed once per episode
+    B   bridge (exactly one): the only crossing of the abyss. It is not a
+        separate stateful mechanic -- it behaves exactly like a '~' cell
+        (same slip_prob chance of slipping sideways instead of crossing),
+        so "collapsing" isn't a one-time flag: every crossing attempt
+        carries the same risk, the first time and any time after.
     .   free cell
 
 room2_env.py configures the layout and reward shaping; this module only
 implements the movement dynamics.
 
 State
-    Whether G ends the episode depends on has_key, and whether B is safe to
-    step on depends on bridge_collapsed -- both are history, not just
-    position, so both have to be part of the *true* state or the task
-    stops being Markovian (the same (row, col) would need two different
-    values for the same action depending on unobserved past events, which
-    breaks SARSA's update rule). The observed state index encodes
-    (row, col, has_key, bridge_collapsed), quadrupling the state space to
-    n_rows*n_cols*4.
+    Whether G ends the episode depends on has_key -- the same (row, col)
+    cell means something different depending on whether the key has
+    already been collected, so has_key has to be part of the *true* state
+    or the task stops being Markovian (the same (row, col) would need two
+    different values for the same action depending on unobserved history,
+    which breaks SARSA's update rule). The observed state index encodes
+    (row, col, has_key), doubling the state space to n_rows*n_cols*2. The
+    bridge needs no equivalent flag: unlike a "used once" mechanic, its
+    risk doesn't depend on history, so it doesn't have to be part of the
+    state.
 """
 from __future__ import annotations
 
@@ -58,13 +62,13 @@ class GridWorldConfig:
 
 
 class GridWorld:
-    """Slippery grid-world with a key-locked exit and a one-time bridge.
+    """Slippery grid-world with a key-locked exit and a slippery bridge.
 
     step() only exposes (next_state, reward, terminated, truncated, info) --
-    the transition model is never returned, matching the "model unknown"
-    premise of the TD rooms (SARSA/Q-Learning). A model-based room (DP) is
-    free to derive its own P(s'|s,a) table separately since it is allowed
-    to know the dynamics; that lookup does not belong on this class.
+    the transition model is never returned, matching this room's "model
+    unknown" premise. A model-based room (DP) is free to derive its own
+    P(s'|s,a) table separately since it is allowed to know the dynamics;
+    that lookup does not belong on this class.
     """
 
     def __init__(self, config: GridWorldConfig):
@@ -78,11 +82,10 @@ class GridWorld:
         self.start = self._find_unique("S")
         self.goal = self._find_unique("G")
         self.key_pos = self._find_unique("K")
-        self.bridge_pos = self._find_unique("B")
+        self._find_unique("B")  # validate layout has exactly one bridge cell
         self.rng = np.random.default_rng(config.seed)
         self.state = self.start
         self.has_key = False
-        self.bridge_collapsed = False
         self.steps_taken = 0
 
     def _find_unique(self, symbol: str) -> tuple[int, int]:
@@ -98,35 +101,33 @@ class GridWorld:
 
     @property
     def n_states(self) -> int:
-        return self.n_rows * self.n_cols * 4  # x2 has_key, x2 bridge_collapsed
+        return self.n_rows * self.n_cols * 2  # x2 for the has_key flag
 
     @property
     def n_actions(self) -> int:
         return len(ACTIONS)
 
-    def encode_state(self, pos: tuple[int, int], has_key: bool, bridge_collapsed: bool) -> int:
+    def encode_state(self, pos: tuple[int, int], has_key: bool) -> int:
         r, c = pos
-        return ((r * self.n_cols + c) * 2 + int(has_key)) * 2 + int(bridge_collapsed)
+        return (r * self.n_cols + c) * 2 + int(has_key)
 
-    def decode_state(self, index: int) -> tuple[tuple[int, int], bool, bool]:
-        index, bridge_collapsed = divmod(index, 2)
+    def decode_state(self, index: int) -> tuple[tuple[int, int], bool]:
         pos_index, has_key = divmod(index, 2)
-        return divmod(pos_index, self.n_cols), bool(has_key), bool(bridge_collapsed)
+        return divmod(pos_index, self.n_cols), bool(has_key)
 
     def to_coords(self, index: int) -> tuple[int, int]:
-        """(row, col) for a full state index, discarding the flag bits -- for rendering."""
-        pos, _, _ = self.decode_state(index)
+        """(row, col) for a full state index, discarding the has_key bit -- for rendering."""
+        pos, _ = self.decode_state(index)
         return pos
 
     def _encode_current(self) -> int:
-        return self.encode_state(self.state, self.has_key, self.bridge_collapsed)
+        return self.encode_state(self.state, self.has_key)
 
     def reset(self, seed: Optional[int] = None) -> tuple[int, dict]:
         if seed is not None:
             self.rng = np.random.default_rng(seed)
         self.state = self.start
         self.has_key = False
-        self.bridge_collapsed = False
         self.steps_taken = 0
         return self._encode_current(), {}
 
@@ -150,30 +151,20 @@ class GridWorld:
             raise ValueError(f"action must be in [0, 3], got {action}")
 
         current_cell = self.grid[self.state[0]][self.state[1]]
-        was_on_bridge = self.state == self.bridge_pos
         slipped = False
         actual_action = action
-        if current_cell == "~" and self.rng.random() < self.cfg.slip_prob:
+        if current_cell in ("~", "B") and self.rng.random() < self.cfg.slip_prob:
             actual_action = self.rng.choice(self._perpendicular_actions(action))
             slipped = True
 
         self.state = self._attempt_move(self.state, actual_action)
         self.steps_taken += 1
-
-        # Leaving the bridge (having actually moved off it) uses it up.
-        if was_on_bridge and self.state != self.bridge_pos:
-            self.bridge_collapsed = True
-
         landed_cell = self.grid[self.state[0]][self.state[1]]
 
         terminated = False
         picked_key = False
         reward = self.cfg.step_reward
         if landed_cell == "P":
-            reward = self.cfg.pit_reward
-            terminated = True
-        elif landed_cell == "B" and self.bridge_collapsed:
-            # stepped back onto an already-collapsed bridge -- falls through
             reward = self.cfg.pit_reward
             terminated = True
         elif landed_cell == "K" and not self.has_key:
@@ -192,7 +183,6 @@ class GridWorld:
             "intended_action": action,
             "has_key": self.has_key,
             "picked_key": picked_key,
-            "bridge_collapsed": self.bridge_collapsed,
         }
         return self._encode_current(), reward, terminated, truncated, info
 
@@ -204,4 +194,4 @@ class GridWorld:
                 for c in range(self.n_cols)
             ]
             rows.append("".join(row_chars))
-        return "\n".join(rows) + f"\n(has_key={self.has_key}, bridge_collapsed={self.bridge_collapsed})"
+        return "\n".join(rows) + f"\n(has_key={self.has_key})"

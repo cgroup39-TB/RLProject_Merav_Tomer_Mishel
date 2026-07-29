@@ -68,7 +68,7 @@ def render_page_header() -> None:
         """
         <div style='padding:24px; background:linear-gradient(180deg, rgba(18,22,29,0.95), rgba(8,10,14,0.95)); border:1px solid #2a2e34; border-radius:22px; margin-bottom:20px;'>
             <h1 style='margin:0; color:#ff8a1a; font-size:2.4rem;'>🌉 Room 2 — The Collapsing Bridge</h1>
-            <p style='margin:10px 0 0 0; color:#cbd5e1; font-size:1.05rem; line-height:1.65;'>SARSA explores an abandoned factory, secures the key, and chooses the safest path across a collapsing bridge while avoiding slippery pipes and a bottomless abyss.</p>
+            <p style='margin:10px 0 0 0; color:#cbd5e1; font-size:1.05rem; line-height:1.65;'>SARSA explores an abandoned factory, secures the key, and learns to live with a slippery bridge that risks a fall into the abyss on every crossing.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -89,12 +89,12 @@ init_state()
 
 LEGEND_ITEMS = [
     ("🚩", "Start — where you wake up"),
-    ("🔑", "Key — collect before the door opens"),
+    ("🔑", "Key — required before the door opens, no way around it"),
     ("🚪", "Door — the exit, locked without the key"),
     ("🧱", "Wall — factory machinery, impassable"),
-    ("💧", "Leaking pipes — slippery floor"),
+    ("💧", "Slippery floor — a move here may slip sideways"),
     ("⚫", "The abyss — one step in, episode over"),
-    ("🪵", "The bridge — collapses the moment you step off it"),
+    ("🪵", "The bridge — slippery too, every crossing risks falling in"),
 ]
 
 
@@ -165,7 +165,7 @@ def render_metrics(history: list[dict], window: int = 50):
 def render_room_briefing() -> None:
     st.markdown("### 📋 Mission briefing")
     st.markdown("- **משימה:** קח את המפתח ואז פתח את הדלת.")
-    st.markdown("- **סכנות:** תהום, רצפה חלקלקה, וגשר שקורס אחרי חצייה.")
+    st.markdown("- **סכנות:** תהום, רצפה חלקלקה, וגשר חלקלק שעלול לקרוס בכל חצייה.")
     st.markdown("- **עיקרון:** SARSA לומד להימנע מסיכונים בסביבה חלקלקה.")
 
 

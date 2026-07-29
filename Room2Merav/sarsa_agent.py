@@ -3,9 +3,9 @@
 Update rule (Room 2 uses this):
     Q(s, a) += alpha * (r + gamma * Q(s', a') - Q(s, a))
 where a' is the action the agent will *actually* take next under its
-epsilon-greedy behavior policy -- not the greedy max, which is what makes
-this on-policy (see Q-Learning's off-policy max update for the contrast
-used in Room 3).
+epsilon-greedy behavior policy -- not the greedy max -- which is what
+makes this on-policy: it commits to the consequences of its own
+exploration when updating its value estimates.
 """
 from __future__ import annotations
 

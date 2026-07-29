@@ -180,14 +180,13 @@ def plot_learning_curves(history: list[dict], window: int = 50) -> Figure:
 def trajectory_to_positions(trajectory: list[dict], n_cols: int = 10) -> list[tuple[int, int]]:
     """Convert a recorded trajectory's flat state indices to (row, col) coords.
 
-    State indices encode (row, col, has_key, bridge_collapsed) as
-    ((row*n_cols+col)*2+has_key)*2+bridge_collapsed (see
-    grid_env.GridWorld.encode_state) -- both flag bits are dropped here
-    since rendering only needs position.
+    State indices encode (row, col, has_key) as (row*n_cols+col)*2+has_key
+    (see grid_env.GridWorld.encode_state) -- the has_key bit is dropped
+    here since rendering only needs position.
     """
     positions = []
     for step in trajectory:
-        pos_index = step["state"] // 4
+        pos_index = step["state"] // 2
         positions.append(divmod(pos_index, n_cols))
     return positions
 

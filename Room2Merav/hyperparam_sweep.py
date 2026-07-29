@@ -6,13 +6,16 @@ changing them would change the room, not tune the agent).
 
 For each combination, trains agents over a couple of seeds, then evaluates
 the learned policy *greedily* (epsilon=0, on fresh episodes) so final policy
-quality is judged independent of training-time exploration noise. Room 2's
-maze is small enough that most reasonable configs eventually reach 100%
-greedy success, so final success rate alone doesn't discriminate between
-them -- the real differentiator (and the one that matters for the brief's
-"faster escape = higher reward" framing) is *how fast* each config
-converges. So we also measure, from the training history, the first
-episode at which a 50-episode rolling success rate reaches 90%.
+quality is judged independent of training-time exploration noise. Since the
+bridge is itself a slippery cell -- not a one-time-safe crossing -- every
+episode's one mandatory bridge-exit move carries an irreducible slip_prob
+chance of failure, capping the achievable success rate at roughly
+1 - slip_prob (~80% at the default slip_prob=0.2), not 100%. So we measure,
+from the training history, the first episode at which a 50-episode rolling
+success rate reaches CONVERGENCE_THRESHOLD -- set safely below that ceiling
+(accounting for epsilon_min residual exploration noise during training),
+rather than the unreachable 0.9 that would make sense for a room without an
+irreducible per-episode risk.
 
 Results are written to sweep_results.csv, best config first (ranked by
 greedy success rate, then convergence speed, then steps-to-goal).
@@ -35,7 +38,7 @@ TRAIN_SEEDS = (0, 1)
 TRAIN_EPISODES = 2000
 EVAL_EPISODES = 200
 CONVERGENCE_WINDOW = 50
-CONVERGENCE_THRESHOLD = 0.9
+CONVERGENCE_THRESHOLD = 0.65
 
 
 def episodes_to_convergence(history: list[dict]) -> float:
