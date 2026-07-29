@@ -117,7 +117,14 @@ def init_state():
     st.session_state.cell_slip_dir = dict(default.cell_slip_dir)
     st.session_state.start = default.start
     st.session_state.goal = default.goal
-    st.session_state.current_room = 1
+    # "current_room" is also the unified router's OWN key for which top-level
+    # room is active (see app.py at the repo root) -- when embedded, the
+    # router already owns that name, and Room1Tomer's main() never reads
+    # this key in that mode anyway (it uses "_embedded_room" instead), so
+    # writing it here would silently clobber the router's navigation state
+    # the moment this bucket (re)initializes.
+    if not st.session_state.get("_embedded"):
+        st.session_state.current_room = 1
     st.session_state.unlocked_room = 1
     st.session_state.results = {}
 
@@ -1196,10 +1203,12 @@ def main():
     inject_grid_css()
     embedded = st.session_state.get("_embedded", False)
 
-    # When embedded in the unified router, the router already knows this is
-    # room 1 -- avoid touching "current_room"/"unlocked_room" at all here,
-    # since those names collide with the router's own navigation state.
-    room = 1 if embedded else st.session_state.current_room
+    # When embedded in the unified router, the router tells us which of our
+    # own rooms to show via "_embedded_room" (it points ids 1, 3 and 5 at
+    # this same app.py) -- avoid touching "current_room"/"unlocked_room" at
+    # all here, since those names collide with the router's own navigation
+    # state.
+    room = st.session_state.get("_embedded_room", 1) if embedded else st.session_state.current_room
 
     # Per-room CSS (incoming branch introduced room3/room5 styles)
     if room == 3:

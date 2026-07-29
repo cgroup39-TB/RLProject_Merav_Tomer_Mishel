@@ -407,8 +407,9 @@ def render_replay(trajectories: dict, q_table, has_key: bool):
 
 def main():
     inject_css()
-    st.title("🌉 Room 2 — The Collapsing Bridge (SARSA)")
-    st.caption("Model unknown, on-policy TD control, slippery grid.")
+    if not st.session_state.get("_embedded"):
+        st.title("🌉 Room 2 — The Collapsing Bridge (SARSA)")
+        st.caption("Model unknown, on-policy TD control, slippery grid.")
 
     is_training = st.session_state.get("is_training", False)
     if is_training:
