@@ -69,9 +69,11 @@ from __future__ import annotations
 
 from typing import Optional
 
+import numpy as np
+
 from grid_env import GridWorld, GridWorldConfig
 
-ROOM2_LAYOUT = (
+BASE_ROOM2_LAYOUT = (
     "S..#..#..K",
     ".#.....#..",
     "...#..#..#",
@@ -85,6 +87,65 @@ ROOM2_LAYOUT = (
 )
 
 
+def generate_random_layout(
+    seed: Optional[int] = None,
+    n_slippery: int = 12,
+    n_pits: int = 10,
+    n_walls: int = 12,
+    base_layout: tuple[str, ...] | None = None,
+) -> tuple[str, ...]:
+    """Return a new layout with `~`, `P` and `#` scattered across floor tiles.
+
+    Special cells `S`, `K`, `B` and `G` are preserved in place; only
+    originally-empty floor cells are used for placing hazards and walls.
+    Counts are capped to the number of available floor cells.
+    """
+    if base_layout is None:
+        base_layout = BASE_ROOM2_LAYOUT
+
+    rng = np.random.default_rng(seed)
+    grid = [list(row) for row in base_layout]
+
+    # collect special positions to protect them from being overwritten
+    specials = {(r, c): grid[r][c] for r in range(10) for c in range(10) if grid[r][c] in ("S", "K", "B", "G")}
+
+    # free floor positions (only '.')
+    free = [(r, c) for r in range(10) for c in range(10) if grid[r][c] == "."]
+    rng.shuffle(free)
+
+    # cap counts
+    max_free = len(free)
+    n_walls = min(n_walls, max_free)
+    remaining = max_free - n_walls
+    n_slippery = min(n_slippery, remaining)
+    remaining -= n_slippery
+    n_pits = min(n_pits, remaining)
+
+    idx = 0
+    for _ in range(n_walls):
+        r, c = free[idx]
+        grid[r][c] = "#"
+        idx += 1
+    for _ in range(n_slippery):
+        r, c = free[idx]
+        grid[r][c] = "~"
+        idx += 1
+    for _ in range(n_pits):
+        r, c = free[idx]
+        grid[r][c] = "P"
+        idx += 1
+
+    # restore specials (shouldn't be necessary, but safe)
+    for (r, c), ch in specials.items():
+        grid[r][c] = ch
+
+    return tuple("".join(row) for row in grid)
+
+
+# keep the legacy name for code that imports ROOM2_LAYOUT directly
+ROOM2_LAYOUT = BASE_ROOM2_LAYOUT
+
+
 def make_room2_env(
     slip_prob: float = 0.2,
     step_reward: float = -1.0,
@@ -95,12 +156,13 @@ def make_room2_env(
     goal_min_reward: float = 20.0,
     max_steps: int = 200,
     seed: Optional[int] = None,
+    layout: tuple[str, ...] | None = None,
 ) -> GridWorld:
     """Build Room 2's environment. All reward/slip knobs are exposed here
     so training code can sweep hyperparameters without touching the layout.
     """
     config = GridWorldConfig(
-        layout=ROOM2_LAYOUT,
+        layout=ROOM2_LAYOUT if layout is None else layout,
         slip_prob=slip_prob,
         step_reward=step_reward,
         pit_reward=pit_reward,
