@@ -17,6 +17,14 @@ class Cell:
     TRAP = "trap"
     START = "start"
     LASER = "laser"
+    # Room 3 (Energy Room) additions.
+    BATTERY = "battery"
+    SWITCH_BLUE = "switch_blue"
+    SWITCH_RED = "switch_red"
+    ELECTRIC_TRAP = "electric_trap"
+    DOOR = "door"
+    CHARGER = "charger"
+    SHORTCUT = "shortcut"
 
 
 class Action:
@@ -61,6 +69,7 @@ class GridConfig:
     cell_slip_dir: dict = field(default_factory=dict)   # (r,c) -> slip direction mode (see SLIP_DIR_MODES)
     start: tuple = (0, 0)
     goal: tuple = (9, 9)
+    guard_path: list = field(default_factory=list)      # Room 3: ordered patrol waypoints, [] = no guard
 
     def cell_type(self, r, c):
         return self.cells.get((r, c), Cell.EMPTY)
@@ -218,6 +227,210 @@ class GridWorldEnv:
         self._state = s_next
         truncated = self._steps >= self.max_steps
         return self.s2i(s_next), reward, done, truncated, {}
+
+
+class EnergyRoomEnv(GridWorldEnv):
+    """
+    Room 3 -- The Energy Room. Extends GridWorldEnv with the flag-based
+    state Q-Learning needs for a job that isn't just "reach the goal":
+    collect the battery, then throw the blue switch, then the red switch --
+    each one gates the next, and the exit itself is locked until all three
+    are done -- plus a patrolling guard robot and an electric trap that's
+    only live on even steps.
+
+    State = (row, col, has_battery, blue_switch_on, red_switch_on), encoded
+    as pos_index * 8 + flag_bits so the tabular Q-Learning solver (which
+    only ever calls reset()/step(), same contract as SARSA in Room 2) can
+    index a plain (n_states, n_actions) table. No known transition model is
+    provided for this room -- Q-Learning doesn't need one.
+
+    Every bonus/penalty below is added on top of the room's step_reward,
+    the same convention Room 2's key bonus used: "-1 per step" is a
+    baseline that always applies, and events like collecting the battery
+    or hitting the guard add to it rather than replacing it.
+    """
+
+    def __init__(
+        self,
+        config,
+        guard_path=None,
+        battery_reward=15.0,
+        switch_blue_reward=20.0,
+        switch_red_reward=25.0,
+        guard_penalty=-30.0,
+        wall_penalty=-2.0,
+        electric_trap_reward=-20.0,
+        charger_reward=5.0,
+        incomplete_exit_reward=-10.0,
+        **kwargs,
+    ):
+        super().__init__(config, **kwargs)
+        self.battery_reward = battery_reward
+        self.switch_blue_reward = switch_blue_reward
+        self.switch_red_reward = switch_red_reward
+        self.guard_penalty = guard_penalty
+        self.wall_penalty = wall_penalty
+        self.electric_trap_reward = electric_trap_reward
+        self.charger_reward = charger_reward
+        self.incomplete_exit_reward = incomplete_exit_reward
+        self.n_states = self.rows * self.cols * 8
+
+        path = list(guard_path or [])
+        # Ping-pong the patrol back and forth along its waypoints instead of
+        # teleporting from the last one back to the first.
+        self._guard_cycle = path + path[-2:0:-1] if len(path) > 1 else path
+
+        self._has_battery = False
+        self._blue_on = False
+        self._red_on = False
+        self._charger_visited = set()
+
+    # ---------- flag-state encoding ----------
+    def _flag_bits(self):
+        return (int(self._has_battery) << 2) | (int(self._blue_on) << 1) | int(self._red_on)
+
+    def _encode(self, pos):
+        return self.s2i(pos) * 8 + self._flag_bits()
+
+    def decode_flags(self, full_state):
+        """full_state -> ((row, col), has_battery, blue_switch_on, red_switch_on)."""
+        pos_i, bits = divmod(full_state, 8)
+        return self.i2s(pos_i), bool(bits >> 2 & 1), bool(bits >> 1 & 1), bool(bits & 1)
+
+    # ---------- guard patrol ----------
+    def guard_pos(self):
+        if not self._guard_cycle:
+            return None
+        return self._guard_cycle[self._steps % len(self._guard_cycle)]
+
+    # ---------- passability, incl. the conditional door/shortcut ----------
+    def _passable(self, r, c):
+        t = self.cfg.cell_type(r, c)
+        if t == Cell.WALL:
+            return False
+        if t == Cell.DOOR and not self._blue_on:
+            return False
+        if t == Cell.SHORTCUT and not self._has_battery:
+            return False
+        return True
+
+    # ---------- simulation interface ----------
+    def reset(self):
+        self._state = self.cfg.start
+        self._steps = 0
+        self._has_battery = False
+        self._blue_on = False
+        self._red_on = False
+        self._charger_visited = set()
+        return self._encode(self._state)
+
+    def step(self, a):
+        self._steps += 1
+        s = self._state
+        real_a = a
+        if self.cfg.cell_type(*s) == Cell.SLIPPERY:
+            if self.rng.random() < self._slip_prob(s):
+                real_a = self._slip_outcome_action(s, a)
+        dr, dc = ACTION_DELTAS[real_a]
+        nr, nc = s[0] + dr, s[1] + dc
+        blocked = not self.in_bounds(nr, nc) or not self._passable(nr, nc)
+        s_next = s if blocked else (nr, nc)
+
+        guard_here = self.guard_pos()
+        collided = guard_here is not None and s_next == guard_here
+        if collided:
+            s_next = s
+
+        reward = self.step_reward
+        if blocked:
+            reward += self.wall_penalty
+        if collided:
+            reward += self.guard_penalty
+
+        done = False
+        if not collided:
+            t = self.cfg.cell_type(*s_next)
+            if t == Cell.BATTERY and not self._has_battery:
+                self._has_battery = True
+                reward += self.battery_reward
+            elif t == Cell.SWITCH_BLUE and self._has_battery and not self._blue_on:
+                self._blue_on = True
+                reward += self.switch_blue_reward
+            elif t == Cell.SWITCH_RED and self._blue_on and not self._red_on:
+                self._red_on = True
+                reward += self.switch_red_reward
+            elif t == Cell.CHARGER and s_next not in self._charger_visited:
+                # One-time per episode -- otherwise a repeatable reward
+                # bigger than the round-trip step cost turns into a farming
+                # loop instead of an incentive to actually finish the room.
+                # Like the trap's step-parity, "already visited" isn't part
+                # of the learned state, only of the reward this step.
+                self._charger_visited.add(s_next)
+                reward += self.charger_reward
+            elif t == Cell.ELECTRIC_TRAP and self._steps % 2 == 0:
+                # Only live on even steps -- the state deliberately doesn't
+                # carry that parity (see the room's state tuple above), so
+                # the agent can't learn to time it exactly; it has to learn
+                # to be cautious near it instead.
+                reward += self.electric_trap_reward
+                done = True
+            elif t == Cell.TRAP:
+                reward += self.trap_reward
+                done = True
+            elif t == Cell.GOAL:
+                if self._has_battery and self._blue_on and self._red_on:
+                    reward += self.goal_reward
+                    done = True
+                else:
+                    reward += self.incomplete_exit_reward
+
+        self._state = s_next
+        truncated = self._steps >= self.max_steps
+        return self._encode(s_next), reward, done, truncated, {}
+
+
+def default_room3_config(rows=10, cols=10):
+    """
+    Room 3 "Energy Room" default layout: a machine-room floor split by one
+    control wall (row 6) into a front half -- start, battery, blue switch --
+    and a back half -- red switch, exit -- reachable only through the DOOR
+    gap (open once the blue switch is thrown) or the SHORTCUT gap (open
+    once the battery is held). A guard robot patrols the corridor just past
+    the wall, and two electric traps flicker along the same stretch, live
+    only on even steps. Hand-designed for exactly 10x10, like Room 2's
+    layout -- it doesn't attempt to degrade to other grid sizes.
+    """
+    layout = [
+        "S........K",
+        "..........",
+        "..........",
+        "....C.....",
+        "..........",
+        "U.........",
+        "#####D#H##",
+        ".E....E...",
+        "..........",
+        ".....Z...G",
+    ]
+    symbol_to_cell = {
+        "#": Cell.WALL,
+        "K": Cell.BATTERY,
+        "U": Cell.SWITCH_BLUE,
+        "Z": Cell.SWITCH_RED,
+        "D": Cell.DOOR,
+        "H": Cell.SHORTCUT,
+        "C": Cell.CHARGER,
+        "E": Cell.ELECTRIC_TRAP,
+    }
+
+    cfg = GridConfig(rows=10, cols=10, start=(0, 0), goal=(9, 9))
+    for r, row in enumerate(layout):
+        for c, ch in enumerate(row):
+            if ch in symbol_to_cell:
+                cfg.cells[(r, c)] = symbol_to_cell[ch]
+    cfg.cells[cfg.goal] = Cell.GOAL
+    cfg.guard_path = [(8, c) for c in range(1, 9)]
+    return cfg
 
 
 def default_config(rows=10, cols=10):

@@ -147,6 +147,73 @@ def main():
         resize[0].click().run()
         ok &= show(at, "6. resize grid")
 
+    # ---- 7. navigate to Room 3 and paint a battery cell --------------------
+    nav3 = [b for b in at.button if b.key == "room_nav_3"]
+    if not nav3:
+        print("  !! Room 3 nav button not found")
+        ok = False
+    else:
+        nav3[0].click().run()
+        ok &= show(at, "7. navigate to Room 3")
+        print("  current_room:", at.session_state.current_room)
+
+        at.session_state.room3_paint_tool = "battery"
+        at.run()
+        cell = [b for b in at.button if b.key == "r3cell_2_2"]
+        if not cell:
+            print("  !! grid button r3cell_2_2 not found")
+            ok = False
+        else:
+            cell[0].click().run()
+            ok &= show(at, "7b. paint battery at (2,2)")
+            print("  room3_grid_cells:", at.session_state.room3_grid_cells.get((2, 2)))
+
+        # guard-patrol tool: click two cells, verify they're recorded in order
+        at.session_state.room3_paint_tool = "guard"
+        at.run()
+        for key in ("r3cell_1_1", "r3cell_1_2"):
+            cell = [b for b in at.button if b.key == key]
+            if cell:
+                cell[0].click().run()
+        ok &= show(at, "7c. paint guard patrol at (1,1) -> (1,2)")
+        print("  room3_guard_path:", at.session_state.room3_guard_path)
+
+        # reset back to the hand-designed default layout before training,
+        # since the ad-hoc battery/guard edits above would otherwise leave
+        # two batteries and a stray guard path on the actual training grid
+        reset_btn = [b for b in at.button if "Reset to default layout" in (b.label or "")]
+        if reset_btn:
+            reset_btn[0].click().run()
+
+    # ---- 8. train Room 3 (Q-Learning), small episode count for speed -------
+    at.session_state.episodes = 300
+    at.run()
+    train = [b for b in at.button if "Train" in (b.label or "")]
+    if train:
+        train[0].click().run()
+        ok &= show(at, "8. train Room 3 (Q-Learning, 300 episodes)")
+        res = at.session_state.results.get(3)
+        print("  solved:", res and res["solved"], "| steps:", res and len(res["path"]) - 1)
+        print("  unlocked_room:", at.session_state.unlocked_room)
+
+    # ---- 9. navigate to Room 5 and train (linear Q-Learning), small budget -
+    nav5 = [b for b in at.button if b.key == "room_nav_5"]
+    if not nav5:
+        print("  !! Room 5 nav button not found")
+        ok = False
+    else:
+        nav5[0].click().run()
+        ok &= show(at, "9. navigate to Room 5")
+        print("  current_room:", at.session_state.current_room)
+
+        at.session_state.r5_episodes = 50
+        at.run()
+        train = [b for b in at.button if "Train" in (b.label or "")]
+        if train:
+            train[0].click().run()
+            ok &= show(at, "9b. train Room 5 (linear Q-Learning, 50 episodes)")
+            res = at.session_state.results.get(5)
+            print("  solved:", res and res["solved"], "| steps:", res and len(res["path"]) - 1)
 
     print("\n" + ("ALL CHECKS PASSED" if ok else "FAILURES FOUND"))
     return 0 if ok else 1
