@@ -87,59 +87,100 @@ BASE_ROOM2_LAYOUT = (
 )
 
 
+def _bfs_reachable(grid: list[list[str]], start: tuple[int, int]) -> set[tuple[int, int]]:
+    n_rows, n_cols = len(grid), len(grid[0])
+    seen = {start}
+    frontier = [start]
+    while frontier:
+        r, c = frontier.pop()
+        for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            nr, nc = r + dr, c + dc
+            if (
+                0 <= nr < n_rows
+                and 0 <= nc < n_cols
+                and grid[nr][nc] not in ("#", "P")
+                and (nr, nc) not in seen
+            ):
+                seen.add((nr, nc))
+                frontier.append((nr, nc))
+    return seen
+
+
 def generate_random_layout(
     seed: Optional[int] = None,
-    n_slippery: int = 12,
-    n_pits: int = 10,
-    n_walls: int = 12,
+    n_slippery: int = 8,
+    n_pits: int = 6,
+    n_walls: int = 8,
     base_layout: tuple[str, ...] | None = None,
+    max_attempts: int = 500,
 ) -> tuple[str, ...]:
     """Return a new layout with `~`, `P` and `#` scattered across floor tiles.
 
     Special cells `S`, `K`, `B` and `G` are preserved in place; only
     originally-empty floor cells are used for placing hazards and walls.
     Counts are capped to the number of available floor cells.
+
+    A random scatter has no guarantee of leaving the maze solvable --
+    corner cells like `G` have only two neighbors, and a single wall or
+    pit landing on either one seals them off completely. So each attempt
+    is checked with a BFS (treating '#' and 'P' as blocked, matching
+    grid_env's actual failure semantics) and re-shuffled if `S` can't
+    reach both `K` and `G`; raises after `max_attempts` failed tries
+    rather than silently handing back an unsolvable maze.
     """
     if base_layout is None:
         base_layout = BASE_ROOM2_LAYOUT
 
     rng = np.random.default_rng(seed)
-    grid = [list(row) for row in base_layout]
+    specials = {
+        (r, c): ch
+        for r, row in enumerate(base_layout)
+        for c, ch in enumerate(row)
+        if ch in ("S", "K", "B", "G")
+    }
+    free = [
+        (r, c)
+        for r, row in enumerate(base_layout)
+        for c, ch in enumerate(row)
+        if ch == "."
+    ]
 
-    # collect special positions to protect them from being overwritten
-    specials = {(r, c): grid[r][c] for r in range(10) for c in range(10) if grid[r][c] in ("S", "K", "B", "G")}
-
-    # free floor positions (only '.')
-    free = [(r, c) for r in range(10) for c in range(10) if grid[r][c] == "."]
-    rng.shuffle(free)
-
-    # cap counts
     max_free = len(free)
     n_walls = min(n_walls, max_free)
-    remaining = max_free - n_walls
-    n_slippery = min(n_slippery, remaining)
-    remaining -= n_slippery
-    n_pits = min(n_pits, remaining)
+    n_slippery = min(n_slippery, max_free - n_walls)
+    n_pits = min(n_pits, max_free - n_walls - n_slippery)
+    pos_of = {ch: (r, c) for (r, c), ch in specials.items()}
 
-    idx = 0
-    for _ in range(n_walls):
-        r, c = free[idx]
-        grid[r][c] = "#"
-        idx += 1
-    for _ in range(n_slippery):
-        r, c = free[idx]
-        grid[r][c] = "~"
-        idx += 1
-    for _ in range(n_pits):
-        r, c = free[idx]
-        grid[r][c] = "P"
-        idx += 1
+    for _ in range(max_attempts):
+        shuffled = list(free)
+        rng.shuffle(shuffled)
+        grid = [list(row) for row in base_layout]
 
-    # restore specials (shouldn't be necessary, but safe)
-    for (r, c), ch in specials.items():
-        grid[r][c] = ch
+        idx = 0
+        for _ in range(n_walls):
+            r, c = shuffled[idx]
+            grid[r][c] = "#"
+            idx += 1
+        for _ in range(n_slippery):
+            r, c = shuffled[idx]
+            grid[r][c] = "~"
+            idx += 1
+        for _ in range(n_pits):
+            r, c = shuffled[idx]
+            grid[r][c] = "P"
+            idx += 1
 
-    return tuple("".join(row) for row in grid)
+        for (r, c), ch in specials.items():
+            grid[r][c] = ch
+
+        reachable = _bfs_reachable(grid, pos_of["S"])
+        if pos_of["K"] in reachable and pos_of["G"] in reachable:
+            return tuple("".join(row) for row in grid)
+
+    raise ValueError(
+        f"generate_random_layout: no solvable maze found in {max_attempts} attempts "
+        f"with n_walls={n_walls}, n_slippery={n_slippery}, n_pits={n_pits} -- try lower counts"
+    )
 
 
 # keep the legacy name for code that imports ROOM2_LAYOUT directly

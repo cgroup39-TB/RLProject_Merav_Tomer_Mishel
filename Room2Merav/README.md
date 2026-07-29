@@ -219,6 +219,19 @@ trajectory (state/action/reward per step) so you can step through them
 afterward — compare the wandering, undertrained Episode 0 against the
 converged final episode.
 
+## Random layout variants
+
+`room2_env.generate_random_layout()` scatters walls/slippery cells/pits
+across the base layout's floor tiles (keeping `S`, `K`, `B`, `G` fixed) for
+anyone who wants a different maze to train on. A random scatter has no
+inherent guarantee of staying solvable — corner cells like `G` have only
+two neighbors, and a single obstacle on either one seals them off
+completely — so each candidate is checked with a BFS and re-shuffled if
+`S` can't reach both `K` and `G`, raising only if no solvable layout turns
+up within `max_attempts`. Not used by the app or the tuned defaults above
+(which are for the hand-designed `BASE_ROOM2_LAYOUT`); pass the result to
+`make_room2_env(layout=...)` to train on a generated maze instead.
+
 ## Files
 
 | File | Contents |
