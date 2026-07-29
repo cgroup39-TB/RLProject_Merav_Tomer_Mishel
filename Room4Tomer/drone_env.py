@@ -74,7 +74,7 @@ class DroneConfig:
     # slider value) -- a pad flush against a corner means any tiny overshoot
     # while landing trips the out-of-bounds check, and a DQN agent reliably
     # learns to stay cautiously short of it rather than risk that crash.
-    pad: Pad = field(default_factory=lambda: Pad(7.5, 7.5, 0.7))
+    pad: Pad = field(default_factory=lambda: Pad(7.5, 7.5, 0.9))
     walls: list = field(default_factory=list)
     wind_zones: list = field(default_factory=list)
     accel_zones: list = field(default_factory=list)
@@ -92,13 +92,13 @@ class DroneEnv:
         config: DroneConfig,
         dt=0.02,
         max_cmd_speed=2.0,
-        max_accel=4.0,
+        max_accel=10.0,
         max_abs_speed=3.0,
         drone_radius=0.15,
-        landing_speed_threshold=0.3,
+        landing_speed_threshold=1.0,
         step_reward=-0.01,
-        shaping_weight=1.0,
-        crash_penalty=-50.0,
+        shaping_weight=3.0,
+        crash_penalty=-30.0,
         landing_bonus_base=100.0,
         landing_bonus_gentleness=50.0,
         max_steps=500,
@@ -232,32 +232,3 @@ class DroneEnv:
         return self._state.copy(), float(reward), bool(done), bool(truncated), info
 
 
-def default_config():
-    return DroneConfig()
-
-
-def _wind_corridor_config():
-    return DroneConfig(
-        start=(1.0, 5.0),
-        pad=Pad(8.0, 5.0, 0.7),
-        walls=[Rect(4.3, 0.0, 1.2, 3.2), Rect(4.3, 6.8, 1.2, 3.2)],
-        wind_zones=[WindZone(3.0, 3.2, 4.0, 3.6, fx=0.0, fy=1.2, gust_std=0.5)],
-    )
-
-
-def _gate_gauntlet_config():
-    return DroneConfig(
-        start=(1.0, 1.0),
-        pad=Pad(7.5, 7.5, 0.7),
-        gates=[
-            Rect(3.8, 4.0, 0.4, 2.0),
-            Rect(6.0, 3.8, 2.0, 0.4),
-        ],
-    )
-
-
-PRESETS = {
-    "Open Room": default_config,
-    "Wind Corridor": _wind_corridor_config,
-    "Gate Gauntlet": _gate_gauntlet_config,
-}

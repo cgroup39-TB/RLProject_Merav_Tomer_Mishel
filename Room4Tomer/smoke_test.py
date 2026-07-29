@@ -30,10 +30,15 @@ def main():
 
     # ---- 2. sidebar changes propagate ---------------------------------------
     at.session_state.wind_scale = 2.0
-    at.session_state.preset = "Wind Corridor"
+    at.session_state.n_walls = 1
     at.run()
-    ok &= show(at, "2. sidebar changes (preset + wind scale)")
-    print("  preset:", at.session_state.preset, "| wind_scale:", at.session_state.wind_scale)
+    at.session_state.wall_0_x = 4.0
+    at.session_state.wall_0_y = 0.0
+    at.session_state.wall_0_w = 1.0
+    at.session_state.wall_0_h = 3.0
+    at.run()
+    ok &= show(at, "2. sidebar changes (1 wall + wind scale)")
+    print("  n_walls:", at.session_state.n_walls, "| wind_scale:", at.session_state.wind_scale)
 
     # ---- 3. train with small overrides (fast) -------------------------------
     at.session_state.episodes = 40

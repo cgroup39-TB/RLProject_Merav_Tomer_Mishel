@@ -27,6 +27,15 @@ if not st.session_state.get("_embedded"):
 DEFAULTS = TrainRoom2Config()
 
 
+def inject_css():
+    st.html("""<style>
+[class*="st-key-paint_"] button {
+    font-size: 1.75rem !important;
+    line-height: 1.1 !important;
+}
+</style>""")
+
+
 def init_state():
     if "initialized" in st.session_state:
         return
@@ -36,7 +45,7 @@ def init_state():
     st.session_state.trained_cfg = None
     st.session_state.q_table = None
     st.session_state.cell_overrides = {}
-    st.session_state.paint_tool = "none"
+    st.session_state.paint_tool = "wall"
     st.session_state.layout_grid = [list(row) for row in ROOM2_LAYOUT]
     st.session_state.trained_layout = None
 
@@ -49,7 +58,6 @@ init_state()
 LAYOUT_TOOLS = {
     "wall": "🧱 Wall",
     "pit": "☠ Pit (abyss)",
-    "slippery_floor": "≈ Slippery floor",
     "empty": "· Empty floor",
     "start": "🚦 Start",
     "key": "🔑 Key",
@@ -57,13 +65,17 @@ LAYOUT_TOOLS = {
     "bridge": "🌉 Bridge",
 }
 LAYOUT_SYMBOL = {
-    "wall": "#", "pit": "P", "slippery_floor": "~", "empty": ".",
+    "wall": "#", "pit": "P", "empty": ".",
     "start": "S", "key": "K", "goal": "G", "bridge": "B",
 }
 PAINT_TOOLS = {
-    "none": "🚫 None (inspect only)",
     **LAYOUT_TOOLS,
-    "slippery": "≈ Slippery (custom %)",
+    # "Slippery" only exists as this one override tool now -- a separate
+    # base-layout "Slippery floor" symbol used to exist too, but it was a
+    # confusing near-duplicate: both just meant "this cell has a slip
+    # probability", the override version is strictly more flexible (any
+    # probability, on any cell) so it's the only one kept.
+    "slippery": "≈ Slippery",
     "reward": "⭐ Reward (custom value)",
     "clear": "🧹 Clear override (this cell)",
 }
@@ -85,8 +97,6 @@ def paint_cell(r: int, c: int) -> None:
     if "cell_overrides" not in st.session_state:
         return  # stale on_click firing before this room's state is (re)initialized
     tool = st.session_state.paint_tool
-    if tool == "none":
-        return
 
     grid = st.session_state.layout_grid
     current_symbol = grid[r][c]
@@ -240,34 +250,89 @@ def render_sidebar() -> TrainRoom2Config:
         st.header("🎮 Game Setup")
 
         st.subheader("SARSA hyperparameters")
-        alpha = st.slider("α · learning rate", 0.01, 1.0, DEFAULTS.alpha, step=0.01)
-        gamma = st.slider("γ · discount factor", 0.0, 0.999, DEFAULTS.gamma, step=0.01)
-        epsilon_start = st.slider("ε₀ · initial exploration", 0.0, 1.0, DEFAULTS.epsilon_start, step=0.05)
-        epsilon_min = st.slider("ε_min · minimum exploration", 0.0, 0.5, DEFAULTS.epsilon_min, step=0.01)
+        alpha = st.slider(
+            "α · learning rate", 0.01, 1.0, DEFAULTS.alpha, step=0.01,
+            help="Step size in the SARSA update: Q(s,a) ← Q(s,a) + α · (r + γ·Q(s',a') − Q(s,a)). "
+                 "Higher α learns faster from each experience but is noisier/less stable.",
+        )
+        gamma = st.slider(
+            "γ · discount factor", 0.0, 0.999, DEFAULTS.gamma, step=0.01,
+            help="Weight on future reward in the SARSA target r + γ·Q(s',a') — the same γ from the "
+                 "Bellman equation. Closer to 1 = the agent plans further ahead; closer to 0 = greedy "
+                 "about immediate reward only.",
+        )
+        epsilon_start = st.slider(
+            "ε₀ · initial exploration", 0.0, 1.0, DEFAULTS.epsilon_start, step=0.05,
+            help="ε-greedy policy: with probability ε, take a random action instead of the current "
+                 "greedy one. ε₀ is this probability at the very start of training (episode 0).",
+        )
+        epsilon_min = st.slider(
+            "ε_min · minimum exploration", 0.0, 0.5, DEFAULTS.epsilon_min, step=0.01,
+            help="The floor ε decays to and never goes below — keeps a little randomness/exploration "
+                 "alive even late in training, so the agent doesn't fully stop exploring.",
+        )
         epsilon_decay = st.slider(
-            "ε decay · exploration decay/episode", 0.90, 0.9999, DEFAULTS.epsilon_decay, step=0.0005, format="%.4f"
+            "ε decay · exploration decay/episode", 0.90, 0.9999, DEFAULTS.epsilon_decay, step=0.0005, format="%.4f",
+            help="After every episode: ε ← max(ε_min, ε · decay). Closer to 1 = ε shrinks slowly "
+                 "(exploration phase lasts longer); further from 1 = shifts to greedy exploitation sooner.",
         )
 
         st.divider()
         st.subheader("Environment")
-        slip_prob = st.slider("Slip probability", 0.0, 1.0, DEFAULTS.slip_prob, step=0.05)
-        max_steps = st.number_input("Max steps / episode", 20, 1000, DEFAULTS.max_steps, step=10)
+        slip_prob = st.slider(
+            "Slip probability", 0.0, 1.0, DEFAULTS.slip_prob, step=0.05,
+            help="On a slippery ('≈') or bridge ('🌉') cell, the chance that a move slips sideways "
+                 "(perpendicular to the direction you chose) instead of going where you intended. "
+                 "This is what makes the room's model 'unknown' to the agent — SARSA never sees this "
+                 "number directly, only its consequences through experience.",
+        )
+        max_steps = st.number_input(
+            "Max steps / episode", 20, 1000, DEFAULTS.max_steps, step=10,
+            help="If the agent hasn't reached the door (with the key) after this many steps, the "
+                 "episode is cut off (truncated) with no bonus — doesn't count as success or failure.",
+        )
 
         st.divider()
         st.subheader("Reward shaping")
-        pit_reward = st.number_input("Pit (abyss) penalty", value=DEFAULTS.pit_reward, step=5.0)
-        key_bonus = st.number_input("🔑 Key bonus", value=DEFAULTS.key_bonus, step=1.0)
-        goal_base_reward = st.number_input("Door base reward", value=DEFAULTS.goal_base_reward, step=5.0)
+        pit_reward = st.number_input(
+            "Pit (abyss) penalty", value=DEFAULTS.pit_reward, step=5.0,
+            help="Reward given the instant the agent falls into a pit ('☠') or slips off the bridge "
+                 "into one — the episode ends immediately (terminal state) with this (negative) reward.",
+        )
+        key_bonus = st.number_input(
+            "🔑 Key bonus", value=DEFAULTS.key_bonus, step=1.0,
+            help="One-time bonus added on top of the normal step reward, the first time the agent "
+                 "reaches the key cell ('🔑'). Gives a flat tabular agent a reason to detour for it "
+                 "instead of heading straight for the door.",
+        )
+        goal_base_reward = st.number_input(
+            "Door base reward", value=DEFAULTS.goal_base_reward, step=5.0,
+            help="The starting value used in the door's reward formula (see 'decay/step' below): "
+                 "reward = max(base − decay×steps_taken, minimum). This is that 'base'.",
+        )
         goal_decay_per_step = st.number_input(
             "Door reward decay / step", value=DEFAULTS.goal_decay_per_step, step=0.1,
-            help="The door's reward shrinks by this much per step taken -- faster escapes score higher.",
+            help="The door's reward shrinks by this much per step taken before reaching it "
+                 "(reward = max(base − decay×steps, minimum)) -- faster escapes score higher.",
         )
-        goal_min_reward = st.number_input("Door minimum reward", value=DEFAULTS.goal_min_reward, step=5.0)
+        goal_min_reward = st.number_input(
+            "Door minimum reward", value=DEFAULTS.goal_min_reward, step=5.0,
+            help="The floor for the door's reward — no matter how long the episode took, actually "
+                 "reaching the door with the key never scores below this (the 'minimum' in "
+                 "reward = max(base − decay×steps, minimum)).",
+        )
 
         st.divider()
         st.subheader("Training run")
-        episodes = st.number_input("Episodes", 100, 20000, DEFAULTS.episodes, step=100)
-        seed = st.number_input("Seed", 0, 10_000, DEFAULTS.seed, step=1)
+        episodes = st.number_input(
+            "Episodes", 100, 20000, DEFAULTS.episodes, step=100,
+            help="How many full episodes (reset → act until terminal/truncated) to train SARSA for.",
+        )
+        seed = st.number_input(
+            "Seed", 0, 10_000, DEFAULTS.seed, step=1,
+            help="Random seed for both the environment's slip rolls and the agent's ε-greedy action "
+                 "sampling — same seed + same settings reproduces the exact same training run.",
+        )
 
         train_clicked = st.button("▶ Train Agent", type="primary", use_container_width=True)
 
@@ -341,6 +406,7 @@ def render_replay(trajectories: dict, q_table, has_key: bool):
 
 
 def main():
+    inject_css()
     st.title("🌉 Room 2 — The Collapsing Bridge (SARSA)")
     st.caption("Model unknown, on-policy TD control, slippery grid.")
 

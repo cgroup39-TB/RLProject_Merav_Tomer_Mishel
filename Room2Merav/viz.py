@@ -27,6 +27,7 @@ WALL_COLOR = "black"
 PATH_COLOR = "orange"
 ARROW_COLOR_ON_HEATMAP = "white"
 ARROW_COLOR_PLAIN = "dimgray"
+SLIPPERY_ARROW_COLOR = "#4fd8ff"  # light blue (תכלת) -- flags a cell with any slip risk at a glance
 
 # (letter, color) for cells Room 1 already has (S/G/trap) plus Room 2's
 # own additions (key, bridge), all in the same bold-colored-letter style.
@@ -214,15 +215,19 @@ def render_grid(
     for r in range(n_rows):
         for c in range(n_cols):
             symbol = layout[r][c]
+            override = cell_overrides.get((r, c))
             if symbol == "#":
                 ax.add_patch(plt.Rectangle((c - 0.5, r - 0.5), 1, 1, color=WALL_COLOR))
             elif symbol in CELL_LETTER:
                 letter, color = CELL_LETTER[symbol]
                 ax.text(c, r, letter, ha="center", va="center", color=color, fontweight="bold")
             elif value is not None:
-                arrow_color = ARROW_COLOR_ON_HEATMAP if q_table is not None else ARROW_COLOR_PLAIN
+                is_slippery = symbol in ("~", "B") or (override is not None and override.slip_prob is not None)
+                if is_slippery:
+                    arrow_color = SLIPPERY_ARROW_COLOR
+                else:
+                    arrow_color = ARROW_COLOR_ON_HEATMAP if q_table is not None else ARROW_COLOR_PLAIN
                 ax.text(c, r, ACTION_ARROWS[policy[r, c]], ha="center", va="center", color=arrow_color, fontsize=9)
-            override = cell_overrides.get((r, c))
             if override is not None:
                 _draw_override_badges(ax, c, r, override)
 

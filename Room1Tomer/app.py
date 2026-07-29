@@ -171,6 +171,10 @@ CHROME_CSS = """
     transform: scale(1.05);
     box-shadow: 0 0 10px rgba(56, 209, 255, 0.45);
 }
+[class*="st-key-cellwrap_"] button {
+    font-size: 1.75rem !important;
+    line-height: 1.1 !important;
+}
 @keyframes laserpulse {
     0%, 100% { box-shadow: 0 0 6px 1px #ff2e2ea0; }
     50% { box-shadow: 0 0 16px 4px #ff2e2ee0; }
