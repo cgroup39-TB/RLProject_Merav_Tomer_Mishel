@@ -118,8 +118,8 @@ S..#..#..K
 #....#..#.
 ..#.~..#..
 .#..#.#..#
-~.~.~.~.~.
-PPBPPPPPPP
+P~.~PP~P~~
+.PBP..P.PP
 ..........
 .........G
 ```
@@ -145,16 +145,22 @@ styled header banner, and a "Mission briefing" panel.
 
 The upper maze's walls are scattered single cells rather than clustered
 blocks, standing in individually for factory machinery. Slippery cells are
-likewise scattered rather than forming one solid band along the abyss edge
-(row 6) — a mix of slippery and plain floor tiles, so the risk near the
-edge varies by column instead of being uniform. "Repair area" (an added
-flavor note from the assignment) is represented as the maze's walled
-sections generally — no distinct game mechanic was specified for it, so
-it's treated as scenery rather than a new hazard type.
+likewise scattered rather than forming one solid band along the abyss
+edge, and the abyss itself is staggered across two rows (6-7) in a jagged
+line rather than one uniform row of pits — every column except the bridge
+is blocked in *either* row 6 or row 7 (never both left open), so the
+barrier stays complete no matter which row does the blocking for that
+column. Verified by BFS two ways: the maze is solvable with the bridge in
+place, and removing the bridge (treating it as a wall) makes the goal
+completely unreachable — confirming it really is the chasm's only gap,
+not just incidentally so. "Repair area" (an added flavor note from the
+assignment) is represented as the maze's walled sections generally — no
+distinct game mechanic was specified for it, so it's treated as scenery
+rather than a new hazard type.
 
 BFS distances (ignoring the key requirement, since that changes *whether*
 `G` terminates, not raw reachability): `S → K` is 17 steps, `K → G` is 23
-more — around 40 steps total, all funneled through the row-7 bridge.
+more — around 40 steps total, all funneled through the bridge.
 
 ## SARSA update rule
 
@@ -190,27 +196,24 @@ docstring.
 | `gamma` (discount) | **0.95** |
 | `epsilon_start` | 1.0 |
 | `epsilon_min` | 0.05 |
-| `epsilon_decay` | **0.995** |
+| `epsilon_decay` | **0.99** |
 
-These are `TrainRoom2Config`'s defaults: ~84% greedy success at ~41 steps,
-converging by ~episode 550 — see `sweep_results.csv` for the full grid.
+These are `TrainRoom2Config`'s defaults: 84% greedy success at ~41 steps,
+converging by ~episode 336 — see `sweep_results.csv` for the full grid.
 Full run (3000 episodes, these defaults):
 
 ![Learning curves](learning_curve.png)
 
-- Success rate: 0% (first 50 episodes) → ~75-80% (last 50 episodes,
+- Success rate: 0% (first 50 episodes) → ~70-75% (last 50 episodes,
   training-time — still with `epsilon_min=0.05` exploration noise, so a
-  little below the ~84% pure-greedy figure)
+  bit below the 84% pure-greedy figure)
 - Average steps on success: ~41-47, consistent with the ~40-step
   `S → K → bridge → G` shortest route
 
-Even with a good config, learning to cross at all is somewhat seed-
-dependent: across 10 training seeds tested with these hyperparameters, 9
-learned a working crossing policy (reaching the ~80-85% ceiling) and 1
-got stuck never attempting the bridge. That's a direct consequence of the
-irreducible per-crossing risk — an unlucky run of early slips while
-exploring near the bridge can teach the agent the bridge looks worse than
-it really is before enough attempts accumulate to correct that estimate.
+Tested across 10 training seeds with these hyperparameters: all 10
+learned a working crossing policy, each reaching 84% greedy success —
+consistent and reliable at this tuning, on the current (jagged, two-row)
+chasm layout.
 
 ## Episode replay
 

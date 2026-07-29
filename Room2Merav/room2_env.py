@@ -50,20 +50,24 @@ Slippery cells ('~') and the bridge ('B')
     a one-time flag that gets set and remembered; every crossing attempt
     carries the same slip_prob risk, whether it's the agent's first
     attempt or its fifth. Scattered slippery cells sit right along the
-    abyss edge (row 6) and through the upper maze, so a slip there can
+    abyss edge (rows 6-7) and through the upper maze, so a slip there can
     drop the agent straight in. This is deliberate -- it is what should
     make SARSA's on-policy caution visible in the learned path.
 
 Layout
     Upper maze (rows 0-5) with the key in the top-right corner -- off the
     direct route, forcing a real detour -- scattered single-cell walls
-    (rather than clustered blocks) standing in for factory machinery,
-    scattered slippery cells along the abyss edge (row 6) rather than one
-    solid band, the abyss/bridge row (7), and a small goal room (rows 8-9)
-    with the locked door below it. "Repair area" (the assignment's added
-    flavor note) is represented as the maze's walled sections generally --
-    no distinct game mechanic was specified for it, so it's treated as
-    scenery rather than a new hazard type.
+    (rather than clustered blocks) standing in for factory machinery, a
+    jagged chasm staggered across two rows (6-7) rather than one uniform
+    row of pits, with slippery cells scattered along its edge, and a
+    small goal room (rows 8-9) with the locked door below it. The bridge
+    is the chasm's only gap; every other column is blocked in either row
+    6 or row 7 (never both open), so the barrier is complete regardless
+    of which row does the blocking for that column -- verified by BFS
+    that removing the bridge makes the goal unreachable. "Repair area"
+    (the assignment's added flavor note) is represented as the maze's
+    walled sections generally -- no distinct game mechanic was specified
+    for it, so it's treated as scenery rather than a new hazard type.
 """
 from __future__ import annotations
 
@@ -80,8 +84,8 @@ BASE_ROOM2_LAYOUT = (
     "#....#..#.",
     "..#.~..#..",
     ".#..#.#..#",
-    "~.~.~.~.~.",
-    "PPBPPPPPPP",
+    "P~.~PP~P~~",
+    ".PBP..P.PP",
     "..........",
     ".........G",
 )
@@ -112,7 +116,7 @@ def generate_random_layout(
     n_pits: int = 6,
     n_walls: int = 8,
     base_layout: tuple[str, ...] | None = None,
-    max_attempts: int = 500,
+    max_attempts: int = 3000,
 ) -> tuple[str, ...]:
     """Return a new layout with `~`, `P` and `#` scattered across floor tiles.
 
