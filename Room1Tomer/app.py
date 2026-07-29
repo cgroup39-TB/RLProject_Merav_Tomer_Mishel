@@ -20,7 +20,8 @@ from grid_env import (
 from dp_solver import value_iteration, policy_iteration
 
 
-st.set_page_config(page_title="Escape Room RL", page_icon="🗝️", layout="wide")
+if not st.session_state.get("_embedded"):
+    st.set_page_config(page_title="Escape Room RL", page_icon="🗝️", layout="wide")
 
 TOOL_LABELS = {
     Cell.EMPTY: "· Empty",
@@ -81,6 +82,8 @@ init_state()
 # grid editing
 # ---------------------------------------------------------------------------
 def paint_cell(r, c):
+    if "start" not in st.session_state:
+        return  # stale on_click firing before this room's state is (re)initialized
     tool = st.session_state.paint_tool
     if tool == Cell.START:
         old = st.session_state.start
@@ -448,19 +451,38 @@ def render_room1_header():
 
 def main():
     inject_grid_css()
-    st.title("🗝️ Escape Room RL")
-    st.caption("Design your environment, choose an algorithm, and watch the agent escape.")
-    render_room_nav()
-    st.divider()
+    embedded = st.session_state.get("_embedded", False)
+    if not embedded:
+        st.title("🗝️ Escape Room RL")
+        st.caption("Design your environment, choose an algorithm, and watch the agent escape.")
+        render_room_nav()
+        st.divider()
 
-    room = st.session_state.current_room
-    params, train_clicked = render_sidebar(room)
+    # When embedded in the unified router, the router already knows this is
+    # room 1 -- avoid touching "current_room"/"unlocked_room" at all here,
+    # since those names collide with the router's own navigation state.
+    room = 1 if embedded else st.session_state.current_room
+    is_training = st.session_state.get("is_training", False)
+
+    if is_training:
+        with st.sidebar:
+            st.header("🎮 Game Setup")
+            st.warning("🔒 Training in progress — parameters are locked until it finishes.")
+        params = st.session_state.get("_locked_params", {})
+    else:
+        params, train_clicked = render_sidebar(room)
+        if train_clicked:
+            st.session_state["is_training"] = True
+            st.session_state["_locked_params"] = params
+            st.rerun()
 
     if room == 1:
         render_room1_header()
         render_grid_editor()
-        if train_clicked:
+        if is_training:
             train_room1(params)
+            st.session_state["is_training"] = False
+            st.rerun()
         render_results()
     else:
         st.info(f"Room {room} — {ROOMS[room-1]['name']} — 🚧 coming soon, we'll build it next.")

@@ -52,26 +52,10 @@ class DecelZone(Rect):
     drag_coeff: float = 1.0
 
 
-@dataclass
-class Gate:
-    axis: str  # "horizontal" or "vertical"
-    base_x: float
-    base_y: float
-    w: float
-    h: float
-    amplitude: float = 0.0
-    period: float = 4.0
-    phase: float = 0.0
-
-    def center_at(self, t):
-        offset = self.amplitude * np.sin(2 * np.pi * t / self.period + self.phase)
-        if self.axis == "vertical":
-            return self.base_x, self.base_y + offset
-        return self.base_x + offset, self.base_y
-
-    def rect_at(self, t):
-        cx, cy = self.center_at(t)
-        return Rect(cx - self.w / 2, cy - self.h / 2, self.w, self.h)
+# Gates are static obstacles, same collision behavior as walls -- kept as a
+# separate DroneConfig field (rather than folded into `walls`) purely so the
+# canvas can theme them differently (a "danger" red, matching the Gate
+# Gauntlet preset's narrative) from ordinary factory walls.
 
 
 @dataclass
@@ -152,8 +136,6 @@ class DroneEnv:
     def _potential(self, x, y):
         return -float(np.hypot(x - self.cfg.pad.x, y - self.cfg.pad.y))
 
-    def _gate_rects(self, t):
-        return [g.rect_at(t) for g in self.cfg.gates]
 
     def step(self, action):
         x, y, vx, vy = self._state
@@ -210,9 +192,8 @@ class DroneEnv:
                     crashed = True
                     break
 
-        gate_rects = self._gate_rects(self._t)
         if not crashed:
-            for g in gate_rects:
+            for g in self.cfg.gates:
                 if g.circle_overlaps(x_new, y_new, self.drone_radius):
                     crashed = True
                     break
@@ -245,7 +226,7 @@ class DroneEnv:
             landed=landed,
             speed=speed_new,
             wind=wind_vec,
-            gate_positions=[(r.x + r.w / 2, r.y + r.h / 2) for r in gate_rects],
+            gate_positions=[(r.x + r.w / 2, r.y + r.h / 2) for r in self.cfg.gates],
             t=self._t,
         )
         return self._state.copy(), float(reward), bool(done), bool(truncated), info
@@ -269,8 +250,8 @@ def _gate_gauntlet_config():
         start=(1.0, 1.0),
         pad=Pad(7.5, 7.5, 0.7),
         gates=[
-            Gate(axis="vertical", base_x=4.0, base_y=5.0, w=0.4, h=2.0, amplitude=3.0, period=4.0, phase=0.0),
-            Gate(axis="horizontal", base_x=7.0, base_y=4.0, w=2.0, h=0.4, amplitude=2.5, period=3.0, phase=1.5),
+            Rect(3.8, 4.0, 0.4, 2.0),
+            Rect(6.0, 3.8, 2.0, 0.4),
         ],
     )
 

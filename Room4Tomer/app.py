@@ -19,9 +19,15 @@ from drone_env import DroneEnv, Pad
 from dqn_solver import QNetwork, train_dqn, run_episode
 from flight_canvas import render_flight_canvas
 
-st.set_page_config(page_title="Escape Room RL — Room 4", page_icon="🚁", layout="wide")
+if not st.session_state.get("_embedded"):
+    st.set_page_config(page_title="Escape Room RL — Room 4", page_icon="🚁", layout="wide")
 
 PRESET_NAMES = list(drone_env.PRESETS.keys())
+PRESET_DESCRIPTIONS = {
+    "Open Room": "No obstacles — empty room, just the pad. Good for testing dynamics/reward tuning alone.",
+    "Wind Corridor": "2 static walls forming a corridor, plus 1 wind zone pushing across it.",
+    "Gate Gauntlet": "2 moving gates (oscillating obstacles), no walls or wind.",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -51,8 +57,6 @@ def build_drone_config(params):
         z.fy *= params["accel_decel_scale"]
     for z in cfg.decel_zones:
         z.drag_coeff *= params["accel_decel_scale"]
-    for g in cfg.gates:
-        g.amplitude *= params["gate_amplitude_scale"]
     cfg.pad = Pad(cfg.pad.x, cfg.pad.y, params["pad_radius"])
     return cfg
 
@@ -72,9 +76,9 @@ def render_sidebar():
         st.divider()
         st.subheader("Room layout")
         preset = st.selectbox("Preset", options=PRESET_NAMES, key="preset")
+        st.caption(PRESET_DESCRIPTIONS.get(preset, ""))
         wind_scale = st.slider("Wind strength ×", 0.0, 3.0, 1.0, key="wind_scale")
         accel_decel_scale = st.slider("Accel/decel zone strength ×", 0.0, 3.0, 1.0, key="accel_decel_scale")
-        gate_amplitude_scale = st.slider("Moving gate amplitude ×", 0.0, 2.0, 1.0, key="gate_amplitude_scale")
 
         st.divider()
         st.subheader("Drone dynamics")
@@ -114,7 +118,6 @@ def render_sidebar():
         params = dict(
             episodes=int(episodes), max_steps=int(max_steps), seed=int(seed),
             preset=preset, wind_scale=wind_scale, accel_decel_scale=accel_decel_scale,
-            gate_amplitude_scale=gate_amplitude_scale,
             max_cmd_speed=max_cmd_speed, max_accel=max_accel, drone_radius=drone_radius,
             landing_speed_threshold=landing_speed_threshold, pad_radius=pad_radius,
             step_reward=step_reward, shaping_weight=shaping_weight, crash_penalty=crash_penalty,
@@ -224,9 +227,23 @@ def main():
     )
     st.divider()
 
-    params, train_clicked = render_sidebar()
-    if train_clicked:
+    is_training = st.session_state.get("is_training", False)
+    if is_training:
+        with st.sidebar:
+            st.header("🚁 Flight Setup")
+            st.warning("🔒 Training in progress — parameters are locked until it finishes.")
+        params = st.session_state.get("_locked_params", {})
+    else:
+        params, train_clicked = render_sidebar()
+        if train_clicked:
+            st.session_state["is_training"] = True
+            st.session_state["_locked_params"] = params
+            st.rerun()
+
+    if is_training:
         train_room4(params)  # shows its own progress bar
+        st.session_state["is_training"] = False
+        st.rerun()
     render_results()
 
 

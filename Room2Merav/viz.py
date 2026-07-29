@@ -20,6 +20,7 @@ from __future__ import annotations
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
+from matplotlib.patches import Wedge
 
 # Room 1's exact conventions (grid_env.py / app.py in Room1Tomer)
 WALL_COLOR = "black"
@@ -150,9 +151,30 @@ def trajectory_to_positions(trajectory: list[dict], n_cols: int = 10) -> list[tu
     return positions
 
 
+def trajectory_to_positions_by_key(
+    trajectory: list[dict], n_cols: int = 10
+) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+    """Split a trajectory's positions into a before-key and after-key
+    polyline, so the route walked before picking up the key can be told
+    apart from the route walked afterward (has_key only ever flips
+    False->True once, so this is a clean prefix/suffix split -- no need to
+    track multiple pickup events). If the same cell is visited in both
+    phases, both polylines pass through it, so both colors show up there.
+    """
+    before, after = [], []
+    for step in trajectory:
+        pos_index, has_key = divmod(step["state"], 2)
+        pos = divmod(pos_index, n_cols)
+        (after if has_key else before).append(pos)
+    if before and after:
+        after = [before[-1]] + after  # connect the two segments visually
+    return before, after
+
+
 def render_grid(
     layout: tuple[str, ...],
     path: list[tuple[int, int]] | None = None,
+    path_segments: list[tuple[list[tuple[int, int]], str, str]] | None = None,
     agent_pos: tuple[int, int] | None = None,
     title: str = "",
     cell_overrides: dict | None = None,
@@ -170,6 +192,12 @@ def render_grid(
     cell_overrides (optional) marks cells with a custom slip probability,
     reward, and/or terminal state (see grid_env.CellOverride) with small
     corner badges, independent of the cell's base layout symbol.
+
+    path_segments (optional) draws multiple colored polylines instead of a
+    single-color path -- e.g. [(before_key_positions, "red", "before key"),
+    (after_key_positions, "blue", "after key")], so the route walked before
+    picking up the key is visually distinct from the route walked after.
+    Takes priority over `path` if both are given.
     """
     n_rows = len(layout)
     n_cols = len(layout[0])
@@ -198,7 +226,35 @@ def render_grid(
             if override is not None:
                 _draw_override_badges(ax, c, r, override)
 
-    if path:
+    if path_segments:
+        for seg_positions, color, label in path_segments:
+            if not seg_positions:
+                continue
+            xs = [c for _, c in seg_positions]
+            ys = [r for r, _ in seg_positions]
+            ax.plot(xs, ys, color=color, linewidth=2.2, marker="o", markersize=3, zorder=4, label=label)
+        # placed above the axes entirely (not "upper left" inside the plot,
+        # which sat right on top of the S cell in the corner) so it never
+        # covers any part of the board
+        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=2, fontsize=8, framealpha=0.9)
+
+        # cells walked through in more than one segment (e.g. before AND
+        # after the key) get a split wedge marker in both colors, so the
+        # overlap is unmistakable instead of one line just hiding the other
+        seg_sets = [(set(positions), color) for positions, color, _ in path_segments if positions]
+        overlap = set()
+        for i in range(len(seg_sets)):
+            for j in range(i + 1, len(seg_sets)):
+                overlap |= seg_sets[i][0] & seg_sets[j][0]
+        for (rr, cc) in overlap:
+            colors_here = [color for positions, color in seg_sets if (rr, cc) in positions]
+            n = len(colors_here)
+            for i, col in enumerate(colors_here):
+                ax.add_patch(Wedge(
+                    (cc, rr), 0.24, 360 * i / n, 360 * (i + 1) / n,
+                    facecolor=col, edgecolor="white", linewidth=0.7, zorder=4.5,
+                ))
+    elif path:
         xs = [c for _, c in path]
         ys = [r for r, _ in path]
         ax.plot(xs, ys, color=PATH_COLOR, linewidth=2, marker="o", markersize=3, zorder=4)
@@ -226,12 +282,15 @@ def render_episode_step(
     q_table: np.ndarray | None = None,
     has_key: bool = False,
 ) -> Figure:
-    """Render the grid with the path walked up to (and agent at) step_index."""
+    """Render the grid with the path walked up to (and agent at) step_index,
+    colored red before the key was picked up and blue after -- so the two
+    phases of the route (and any cell revisited in both) are distinguishable."""
     positions = trajectory_to_positions(trajectory, n_cols=n_cols)
     step_index = max(0, min(step_index, len(positions) - 1))
+    before, after = trajectory_to_positions_by_key(trajectory[: step_index + 1], n_cols=n_cols)
     return render_grid(
         layout,
-        path=positions[: step_index + 1],
+        path_segments=[(before, "red", "before key"), (after, "blue", "after key")],
         agent_pos=positions[step_index],
         title=f"Step {step_index} / {len(positions) - 1}",
         cell_overrides=cell_overrides,

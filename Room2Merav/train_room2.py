@@ -39,6 +39,11 @@ class TrainRoom2Config:
     slip_prob: float = 0.2
     seed: Optional[int] = 0
     results_dir: str = "results/room2"
+    pit_reward: float = -20.0
+    key_bonus: float = 10.0
+    goal_base_reward: float = 100.0
+    goal_decay_per_step: float = 1.0
+    goal_min_reward: float = 20.0
 
 
 def _episodes_to_record(n_episodes: int) -> set[int]:
@@ -48,14 +53,23 @@ def _episodes_to_record(n_episodes: int) -> set[int]:
     return {p for p in picks if 0 <= p < n_episodes}
 
 
-def train(cfg: TrainRoom2Config, cell_overrides: dict[tuple[int, int], CellOverride] | None = None):
-    """cell_overrides is a live-editor concern (see app.py's grid editor),
-    not a persisted hyperparameter, so it's a separate argument rather
-    than a TrainRoom2Config field -- it has tuple keys and dataclass
-    values, which json.dumps (used by _save_results) can't serialize.
+def train(
+    cfg: TrainRoom2Config,
+    cell_overrides: dict[tuple[int, int], CellOverride] | None = None,
+    layout: tuple[str, ...] | None = None,
+):
+    """cell_overrides and layout are live-editor concerns (see app.py's grid
+    editor), not persisted hyperparameters, so they're separate arguments
+    rather than TrainRoom2Config fields -- cell_overrides has tuple keys and
+    dataclass values, which json.dumps (used by _save_results) can't
+    serialize.
     """
     env = make_room2_env(
-        slip_prob=cfg.slip_prob, max_steps=cfg.max_steps, seed=cfg.seed, cell_overrides=cell_overrides
+        slip_prob=cfg.slip_prob, max_steps=cfg.max_steps, seed=cfg.seed,
+        cell_overrides=cell_overrides, layout=layout,
+        pit_reward=cfg.pit_reward, key_bonus=cfg.key_bonus,
+        goal_base_reward=cfg.goal_base_reward, goal_decay_per_step=cfg.goal_decay_per_step,
+        goal_min_reward=cfg.goal_min_reward,
     )
     agent = SARSAAgent(
         SARSAConfig(
