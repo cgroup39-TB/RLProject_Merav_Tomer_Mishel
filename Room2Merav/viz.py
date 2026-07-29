@@ -1,13 +1,19 @@
-"""Plotting helpers for Room 2: learning-curve charts and episode replay.
+"""Plotting helpers for Room 2: learning-curve charts and grid rendering.
 
-Kept as plain matplotlib functions (no Streamlit dependency) so they can be
-unit-tested/used standalone; app.py just calls these and hands the returned
-Figure to st.pyplot().
+Styled to match Room 1's DP visualization, so the merged multi-room app
+looks like one consistent product rather than a patchwork: a light
+background, a viridis heatmap of the learned value function (Room 1's
+V(s), here SARSA's V(s) = max_a Q(s,a)), plain bold colored letters for
+special cells, black squares for walls, and an orange path line with
+small circle markers. Room 2 has two things Room 1 doesn't -- a has_key
+state split (so the heatmap/policy are shown per key-state) and a couple
+of extra cell types (the key, the bridge) -- those get the same "bold
+colored letter" treatment for consistency, in colors that don't collide
+with Room 1's existing S/G/trap palette.
 
-Styled as a dark, abandoned-factory escape room: near-black stone floors
-and machinery, a start flag marking the entry point, teal leaking pipes,
-a bottomless-black abyss, a warm wooden bridge plank, a glowing gold key,
-and an emergency-green exit door.
+Kept as plain matplotlib functions (no Streamlit dependency) so they can
+be unit-tested/used standalone; app.py just calls these and hands the
+returned Figure to st.pyplot().
 """
 from __future__ import annotations
 
@@ -15,114 +21,68 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
-BG_COLOR = "#0d0f12"        # near-black factory gloom
-PANEL_COLOR = "#14171b"     # slightly lighter panel background
-GRID_LINE_COLOR = "#2a2e34"
-TEXT_COLOR = "#d8dee6"
+# Room 1's exact conventions (grid_env.py / app.py in Room1Tomer)
+WALL_COLOR = "black"
+PATH_COLOR = "orange"
+ARROW_COLOR_ON_HEATMAP = "white"
+ARROW_COLOR_PLAIN = "dimgray"
 
-CELL_COLORS = {
-    ".": "#1b1e23",  # bare factory floor
-    "#": "#24272c",  # wall / machinery (darker than floor, with hatch texture)
-    "~": "#1e5f66",  # leaking pipes -- dim teal slick
-    "P": "#050505",  # the abyss -- bottomless black
-    "B": "#9a6a35",  # bridge plank, warm wood under lamp light
-    "K": "#f2b705",  # key -- glowing gold
-    "S": "#ff7a1a",  # start -- marker tile
-    "G": "#28a862",  # door / exit -- emergency-green glow
+# (letter, color) for cells Room 1 already has (S/G/trap) plus Room 2's
+# own additions (key, bridge), all in the same bold-colored-letter style.
+CELL_LETTER = {
+    "S": ("S", "lime"),
+    "G": ("G", "red"),
+    "P": ("X", "orangered"),   # abyss -- rendered as Room 1's trap letter
+    "K": ("K", "gold"),
+    "B": ("B", "deepskyblue"),
 }
-WALL_HATCH_COLOR = "#3a3f46"
-PATH_COLOR = "#f08f26"
-AGENT_COLOR = "#ffcc33"
-AGENT_EDGE_COLOR = "#ffffff"
+
+# Room 2's action encoding (grid_env.ACTIONS): 0=UP, 1=RIGHT, 2=DOWN, 3=LEFT
+ACTION_ARROWS = {0: "↑", 1: "→", 2: "↓", 3: "←"}
+
+OVERRIDE_BADGE_COLORS = {
+    "slip_prob": "#1f77b4",       # blue -- matches the viridis family
+    "reward": "#2ca02c",          # green -- a bonus
+    "terminal_reward": "#d62728",  # red -- ends the episode
+}
 
 
-def _draw_start_icon(ax, cx: float, cy: float) -> None:
-    """Start flag: a pole with a small flag, marking the entry point."""
-    ax.add_patch(plt.Rectangle((cx - 0.03, cy - 0.3), 0.06, 0.55, facecolor="#d8dee6", edgecolor="none", zorder=5))
-    ax.add_patch(plt.Circle((cx, cy + 0.28), 0.045, facecolor="#d8dee6", edgecolor="none", zorder=5))
-    ax.add_patch(
-        plt.Polygon(
-            [(cx + 0.03, cy + 0.24), (cx + 0.34, cy + 0.13), (cx + 0.03, cy + 0.02)],
-            closed=True,
-            facecolor="#fff3d6",
-            edgecolor="#8a6b1a",
-            linewidth=0.8,
-            zorder=5,
-        )
-    )
+def _draw_override_badges(ax, cx: float, cy: float, override) -> None:
+    """Small corner squares marking which per-cell overrides are active.
 
-
-def _draw_key_icon(ax, cx: float, cy: float) -> None:
-    """Classic key: a ring bow, a shaft, and two teeth."""
-    outline = "#5c4400"
-    ax.add_patch(plt.Circle((cx - 0.2, cy), 0.15, facecolor=outline, edgecolor="none", zorder=5))
-    ax.add_patch(plt.Circle((cx - 0.2, cy), 0.075, facecolor=CELL_COLORS["K"], edgecolor="none", zorder=6))
-    ax.add_patch(plt.Rectangle((cx - 0.06, cy - 0.045), 0.36, 0.09, facecolor=outline, edgecolor="none", zorder=5))
-    ax.add_patch(plt.Rectangle((cx + 0.18, cy - 0.14), 0.06, 0.1, facecolor=outline, edgecolor="none", zorder=5))
-    ax.add_patch(plt.Rectangle((cx + 0.27, cy - 0.14), 0.06, 0.07, facecolor=outline, edgecolor="none", zorder=5))
-
-
-def _draw_door_icon(ax, cx: float, cy: float) -> None:
-    """Door: a panel with an offset handle."""
-    ax.add_patch(plt.Rectangle((cx - 0.17, cy - 0.26), 0.34, 0.5, facecolor="#eafff0", edgecolor="#0a2916", linewidth=1.4, zorder=5))
-    ax.add_patch(plt.Circle((cx + 0.09, cy), 0.035, facecolor="#0a2916", edgecolor="none", zorder=6))
-
-
-def _draw_abyss_icon(ax, cx: float, cy: float) -> None:
-    """Bottomless hole: concentric rings fading to black."""
-    for radius, color in [(0.36, "#3a0d0d"), (0.25, "#200606"), (0.13, "#000000")]:
-        ax.add_patch(plt.Circle((cx, cy), radius, facecolor=color, edgecolor="none", zorder=5))
-
-
-def _draw_bridge_icon(ax, cx: float, cy: float) -> None:
-    """Wood planks laid across the cell."""
-    for i, dy in enumerate((-0.3, -0.1, 0.1, 0.3)):
+    Room 1 has no equivalent (its cell_rewards dict isn't visualized on
+    the grid either), so there's no existing convention to match here --
+    these just need to read clearly against the light background.
+    """
+    active = [
+        key
+        for key in ("slip_prob", "reward", "terminal_reward")
+        if getattr(override, key, None) is not None
+    ]
+    for i, key in enumerate(active):
         ax.add_patch(
             plt.Rectangle(
-                (cx - 0.38, cy + dy - 0.08),
-                0.76,
-                0.16,
-                facecolor="#7a4a1f" if i % 2 == 0 else "#8a5a2b",
-                edgecolor="#4a2e10",
-                linewidth=0.8,
-                zorder=5,
+                (cx - 0.48 + i * 0.14, cy + 0.34),
+                0.12,
+                0.12,
+                facecolor=OVERRIDE_BADGE_COLORS[key],
+                edgecolor="white",
+                linewidth=0.5,
+                zorder=7,
             )
         )
 
 
-def _draw_slip_icon(ax, cx: float, cy: float) -> None:
-    """A couple of droplets, for leaking pipes."""
-    for dx in (-0.15, 0.13):
-        ax.add_patch(
-            plt.Polygon(
-                [(cx + dx, cy + 0.22), (cx + dx - 0.09, cy - 0.06), (cx + dx, cy - 0.18), (cx + dx + 0.09, cy - 0.06)],
-                closed=True,
-                facecolor="#8fe6ee",
-                edgecolor="#1e5f66",
-                linewidth=0.6,
-                zorder=5,
-            )
-        )
-
-
-CELL_ICONS = {
-    "S": _draw_start_icon,
-    "K": _draw_key_icon,
-    "G": _draw_door_icon,
-    "P": _draw_abyss_icon,
-    "B": _draw_bridge_icon,
-    "~": _draw_slip_icon,
-}
-
-
-def _style_dark_axes(ax) -> None:
-    ax.set_facecolor(PANEL_COLOR)
-    ax.tick_params(colors=TEXT_COLOR)
-    for spine in ax.spines.values():
-        spine.set_color(GRID_LINE_COLOR)
-    ax.title.set_color(TEXT_COLOR)
-    ax.xaxis.label.set_color(TEXT_COLOR)
-    ax.yaxis.label.set_color(TEXT_COLOR)
+def _value_and_policy(q_table: np.ndarray, n_rows: int, n_cols: int, has_key: bool):
+    """V(s) = max_a Q(s,a) and greedy policy, reshaped to the grid, for one has_key slice."""
+    value = np.zeros((n_rows, n_cols))
+    policy = np.zeros((n_rows, n_cols), dtype=int)
+    for r in range(n_rows):
+        for c in range(n_cols):
+            idx = (r * n_cols + c) * 2 + int(has_key)
+            value[r, c] = q_table[idx].max()
+            policy[r, c] = int(q_table[idx].argmax())
+    return value, policy
 
 
 def _rolling_mean(values: list[float], window: int) -> list[float]:
@@ -142,36 +102,35 @@ def plot_learning_curves(history: list[dict], window: int = 50) -> Figure:
     epsilons = [h["epsilon"] for h in history]
     successes = [float(h["success"]) for h in history]
 
-    fig, axes = plt.subplots(2, 2, figsize=(11, 7), facecolor=BG_COLOR)
+    fig, axes = plt.subplots(2, 2, figsize=(11, 7))
 
     ax = axes[0, 0]
-    ax.plot(episodes, returns, color="#4a5568", linewidth=0.8, label="return")
-    ax.plot(episodes, _rolling_mean(returns, window), color="#ff7a1a", linewidth=2, label=f"rolling mean ({window})")
+    ax.plot(episodes, returns, color="gray", alpha=0.3, linewidth=0.7, label="return")
+    ax.plot(episodes, _rolling_mean(returns, window), color="orange", linewidth=2, label=f"rolling mean ({window})")
     ax.set_title("Episode return")
     ax.set_xlabel("episode")
-    ax.legend(loc="lower right", fontsize=8, facecolor=PANEL_COLOR, labelcolor=TEXT_COLOR, edgecolor=GRID_LINE_COLOR)
+    ax.legend(loc="lower right", fontsize=8)
 
     ax = axes[0, 1]
-    ax.plot(episodes, steps, color="#4a5568", linewidth=0.8, label="steps")
-    ax.plot(episodes, _rolling_mean(steps, window), color="#f2b705", linewidth=2, label=f"rolling mean ({window})")
+    ax.plot(episodes, steps, color="gray", alpha=0.3, linewidth=0.7, label="steps")
+    ax.plot(episodes, _rolling_mean(steps, window), color="orange", linewidth=2, label=f"rolling mean ({window})")
     ax.set_title("Steps to terminal state")
     ax.set_xlabel("episode")
-    ax.legend(loc="upper right", fontsize=8, facecolor=PANEL_COLOR, labelcolor=TEXT_COLOR, edgecolor=GRID_LINE_COLOR)
+    ax.legend(loc="upper right", fontsize=8)
 
     ax = axes[1, 0]
-    ax.plot(episodes, epsilons, color="#e8590c")
+    ax.plot(episodes, epsilons, color="orange")
     ax.set_title("Epsilon (exploration rate)")
     ax.set_xlabel("episode")
 
     ax = axes[1, 1]
-    ax.plot(episodes, _rolling_mean(successes, window), color="#28a862")
+    ax.plot(episodes, _rolling_mean(successes, window), color="green")
     ax.set_ylim(-0.05, 1.05)
     ax.set_title(f"Rolling success rate (window={window})")
     ax.set_xlabel("episode")
 
     for ax in axes.flat:
-        _style_dark_axes(ax)
-        ax.grid(True, color=GRID_LINE_COLOR, linewidth=0.5)
+        ax.grid(True, alpha=0.3)
 
     fig.tight_layout()
     return fig
@@ -191,42 +150,22 @@ def trajectory_to_positions(trajectory: list[dict], n_cols: int = 10) -> list[tu
     return positions
 
 
-OVERRIDE_BADGE_COLORS = {
-    "slip_prob": "#5fd0ff",       # cyan -- matches the slippery droplet theme
-    "reward": "#7cd992",          # green -- a bonus
-    "terminal_reward": "#ff5f5f",  # red -- ends the episode
-}
-
-
-def _draw_override_badges(ax, cx: float, cy: float, override) -> None:
-    """Small corner squares marking which per-cell overrides are active."""
-    active = [
-        key
-        for key in ("slip_prob", "reward", "terminal_reward")
-        if getattr(override, key, None) is not None
-    ]
-    for i, key in enumerate(active):
-        ax.add_patch(
-            plt.Rectangle(
-                (cx - 0.48 + i * 0.14, cy + 0.34),
-                0.12,
-                0.12,
-                facecolor=OVERRIDE_BADGE_COLORS[key],
-                edgecolor="#0d0f12",
-                linewidth=0.4,
-                zorder=7,
-            )
-        )
-
-
 def render_grid(
     layout: tuple[str, ...],
     path: list[tuple[int, int]] | None = None,
     agent_pos: tuple[int, int] | None = None,
     title: str = "",
     cell_overrides: dict | None = None,
+    q_table: np.ndarray | None = None,
+    has_key: bool = False,
 ) -> Figure:
-    """Static render of the grid, with an optional traversed path and agent marker.
+    """Render the grid, matching Room 1's plot_result style.
+
+    Without q_table: a plain light-background preview -- colored letters
+    for special cells, black wall squares -- for showing the room before
+    training. With q_table: a viridis heatmap of V(s) = max_a Q(s,a) for
+    the given has_key slice, plus a greedy-policy arrow on every ordinary
+    cell, exactly like Room 1's post-training plot.
 
     cell_overrides (optional) marks cells with a custom slip probability,
     reward, and/or terminal state (see grid_env.CellOverride) with small
@@ -236,58 +175,44 @@ def render_grid(
     n_cols = len(layout[0])
     cell_overrides = cell_overrides or {}
 
-    fig, ax = plt.subplots(figsize=(5, 5), facecolor=BG_COLOR)
+    fig, ax = plt.subplots(figsize=(5.5, 5.5))
+
+    value = policy = None
+    if q_table is not None:
+        value, policy = _value_and_policy(q_table, n_rows, n_cols, has_key)
+        im = ax.imshow(value, cmap="viridis")
+        fig.colorbar(im, ax=ax, label="V(s)", fraction=0.046)
+
     for r in range(n_rows):
         for c in range(n_cols):
             symbol = layout[r][c]
-            color = CELL_COLORS.get(symbol, CELL_COLORS["."])
-            is_wall = symbol == "#"
-            ax.add_patch(
-                plt.Rectangle(
-                    (c, n_rows - 1 - r),
-                    1,
-                    1,
-                    facecolor=color,
-                    edgecolor=WALL_HATCH_COLOR if is_wall else GRID_LINE_COLOR,
-                    hatch="///" if is_wall else None,
-                    linewidth=0.6,
-                )
-            )
-            draw_icon = CELL_ICONS.get(symbol)
-            if draw_icon:
-                draw_icon(ax, c + 0.5, n_rows - 1 - r + 0.5)
+            if symbol == "#":
+                ax.add_patch(plt.Rectangle((c - 0.5, r - 0.5), 1, 1, color=WALL_COLOR))
+            elif symbol in CELL_LETTER:
+                letter, color = CELL_LETTER[symbol]
+                ax.text(c, r, letter, ha="center", va="center", color=color, fontweight="bold")
+            elif value is not None:
+                arrow_color = ARROW_COLOR_ON_HEATMAP if q_table is not None else ARROW_COLOR_PLAIN
+                ax.text(c, r, ACTION_ARROWS[policy[r, c]], ha="center", va="center", color=arrow_color, fontsize=9)
             override = cell_overrides.get((r, c))
             if override is not None:
-                _draw_override_badges(ax, c + 0.5, n_rows - 1 - r + 0.5, override)
+                _draw_override_badges(ax, c, r, override)
 
     if path:
-        xs = [c + 0.5 for _, c in path]
-        ys = [n_rows - 1 - r + 0.5 for r, _ in path]
-        ax.plot(xs, ys, color=PATH_COLOR, linewidth=3, alpha=0.85, zorder=3)
-        ax.scatter(xs, ys, color=PATH_COLOR, s=30, zorder=4)
+        xs = [c for _, c in path]
+        ys = [r for r, _ in path]
+        ax.plot(xs, ys, color=PATH_COLOR, linewidth=2, marker="o", markersize=3, zorder=4)
 
     if agent_pos:
         r, c = agent_pos
-        ax.plot(
-            c + 0.5,
-            n_rows - 1 - r + 0.5,
-            marker="o",
-            markersize=16,
-            color=AGENT_COLOR,
-            markeredgecolor=AGENT_EDGE_COLOR,
-            markeredgewidth=2,
-            zorder=5,
-        )
+        ax.plot(c, r, marker="o", markersize=12, color=PATH_COLOR, markeredgecolor="black", markeredgewidth=1.2, zorder=5)
 
-    ax.set_xlim(0, n_cols)
-    ax.set_ylim(0, n_rows)
+    ax.set_xlim(-0.5, n_cols - 0.5)
+    ax.set_ylim(n_rows - 0.5, -0.5)
     ax.set_xticks([])
     ax.set_yticks([])
     ax.set_aspect("equal")
-    ax.set_title(title, color=TEXT_COLOR)
-    ax.set_facecolor(PANEL_COLOR)
-    for spine in ax.spines.values():
-        spine.set_color(GRID_LINE_COLOR)
+    ax.set_title(title)
     fig.tight_layout()
     return fig
 
@@ -298,6 +223,8 @@ def render_episode_step(
     step_index: int,
     n_cols: int = 10,
     cell_overrides: dict | None = None,
+    q_table: np.ndarray | None = None,
+    has_key: bool = False,
 ) -> Figure:
     """Render the grid with the path walked up to (and agent at) step_index."""
     positions = trajectory_to_positions(trajectory, n_cols=n_cols)
@@ -308,4 +235,6 @@ def render_episode_step(
         agent_pos=positions[step_index],
         title=f"Step {step_index} / {len(positions) - 1}",
         cell_overrides=cell_overrides,
+        q_table=q_table,
+        has_key=has_key,
     )

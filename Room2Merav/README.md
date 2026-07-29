@@ -129,19 +129,19 @@ P~.~PP~P~~
 
 ![Room 2 layout](room_layout.png)
 
-Rendered in a dark, abandoned-factory palette (`viz.py`), with every
-special cell drawn as a small hand-built icon rather than a letter — a
-flag marking the start, a classic key silhouette (ring, shaft, teeth), a
-door with a handle for the exit, concentric rings fading to black for the
-abyss, wood-plank stripes for the bridge, and droplets for the slippery
-cells. (Plain text labels were the original design; matplotlib's Agg
-backend can't actually render color emoji glyphs — the color-emoji font
-crashes the renderer outright — so these are vector shapes drawn directly
-with matplotlib patches, not font glyphs.) The Streamlit app (`app.py`)
-mirrors this with a dark, icon-labeled sidebar (grouped into SARSA
-hyperparameters / Environment / Training run), an emoji-based legend (safe
-there, since the sidebar is rendered by the browser, not matplotlib), a
-styled header banner, and a "Mission briefing" panel.
+Rendered to match Room 1's DP visualization exactly (`viz.py`), for a
+consistent look across the merged multi-room app: `S` in lime, `G` in
+red, the abyss (`P`) as an orangered `X` (Room 1's trap letter/color),
+black squares for walls, and — once trained — a viridis heatmap of
+`V(s) = max_a Q(s,a)` with a white greedy-policy arrow on every ordinary
+cell, exactly like Room 1's post-training plot. Room 2 adds two cell
+types Room 1 doesn't have (the key and the bridge), rendered in the same
+bold-colored-letter style: `K` in gold, `B` in deep sky blue. Because
+Room 2's state includes `has_key`, the app has a "Before key / After key"
+toggle to view either state's heatmap and policy. The Streamlit sidebar's
+legend and grid-editor icons also match Room 1's exact choices where the
+concept overlaps (🚦 start, 🏁 goal, 🧱 wall, ≈ slippery, ☠ trap/abyss),
+with new icons in the same style for the key (🔑) and bridge (🌉).
 
 The upper maze's walls are scattered single cells rather than clustered
 blocks, standing in individually for factory machinery. Slippery cells are
@@ -220,7 +220,11 @@ chasm layout.
 `app.py`'s training run records the first, middle, and last episode's full
 trajectory (state/action/reward per step) so you can step through them
 afterward — compare the wandering, undertrained Episode 0 against the
-converged final episode.
+converged final episode. Once trained, both the room layout and the
+replay view show the viridis `V(s)` heatmap and greedy-policy arrows
+(see above) under whichever "Before key / After key" toggle is selected,
+so you can watch how the path and the underlying value estimates differ
+once the key changes what `G` means.
 
 ## Grid editor: per-cell overrides
 
@@ -244,11 +248,12 @@ for instance — and overrides always take priority over the cell's base
 symbol behavior. `app.py`'s "🎨 Grid editor" expander provides a paint-tool
 UI for this: pick a tool (slippery/reward/terminal/clear), set its value,
 then click cells in the 10x10 grid to apply it — the room preview and the
-episode replay both mark overridden cells with small corner badges (cyan
-for slippery, green for reward, red for terminal). Training passes the
-current overrides straight into `make_room2_env(cell_overrides=...)`, so
-whatever's painted when you hit **Train Agent** is what the agent learns
-against.
+episode replay both mark overridden cells with small corner badges (blue
+for slippery, green for reward, red for terminal — Room 1 has no
+equivalent convention to match here, since its own `cell_rewards` isn't
+visualized on the grid either). Training passes the current overrides
+straight into `make_room2_env(cell_overrides=...)`, so whatever's painted
+when you hit **Train Agent** is what the agent learns against.
 
 ## Random layout variants
 
