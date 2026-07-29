@@ -18,6 +18,7 @@ from grid_env import (
     SLIP_DIR_MODES, SLIP_DIR_LABELS,
 )
 from dp_solver import value_iteration, policy_iteration
+from sarsa_solver import sarsa
 
 
 st.set_page_config(page_title="Escape Room RL", page_icon="🗝️", layout="wide")
@@ -359,6 +360,59 @@ def train_room1(params):
         st.session_state.unlocked_room = max(st.session_state.unlocked_room, 2)
 
 
+# ---------------------------------------------------------------------------
+# training + results (Room 2 — SARSA)
+# ---------------------------------------------------------------------------
+def train_room2(params):
+    cfg = build_config()
+    env = GridWorldEnv(
+        cfg,
+        slip_prob=params["slip_prob"],
+        step_reward=params["step_reward"],
+        goal_reward=params["goal_reward"],
+        trap_reward=params["trap_reward"],
+        laser_reward=params["laser_reward"],
+        gamma=params["gamma"],
+        potential_shaping=params["shaping"],
+        seed=params["seed"],
+    )
+    Q, policy, info = sarsa(
+        env,
+        env.n_states,
+        env.n_actions,
+        episodes=params["episodes"],
+        alpha=params["alpha"],
+        gamma=params["gamma"],
+        epsilon=params["epsilon"],
+        epsilon_min=params["epsilon_min"],
+        epsilon_decay=params["epsilon_decay"],
+        max_steps=env.max_steps,
+        seed=params["seed"],
+    )
+
+    s = env.reset()
+    path = [env.i2s(s)]
+    total_reward = 0.0
+    solved = False
+    for _ in range(env.max_steps):
+        a = int(policy[s])
+        s, r, done, truncated, _ = env.step(a)
+        total_reward += r
+        path.append(env.i2s(s))
+        if done:
+            solved = env.cfg.cell_type(*env.i2s(s)) == Cell.GOAL
+            break
+        if truncated:
+            break
+
+    st.session_state.results[2] = dict(
+        env=env, V=Q.max(axis=1), policy=policy, info=info,
+        path=path, total_reward=total_reward, solved=solved,
+    )
+    if solved:
+        st.session_state.unlocked_room = max(st.session_state.unlocked_room, 3)
+
+
 def plot_result(res):
     env = res["env"]
     V = res["V"].reshape(env.rows, env.cols)
@@ -395,9 +449,28 @@ def plot_result(res):
     return fig
 
 
-def render_results():
+def plot_learning_curve(info, window=50):
+    rewards = info["reward_history"]
+    roll = []
+    for i in range(len(rewards)):
+        lo = max(0, i - window + 1)
+        chunk = rewards[lo:i + 1]
+        roll.append(sum(chunk) / len(chunk))
+
+    fig, ax = plt.subplots(figsize=(6, 2.6))
+    ax.plot(rewards, color="gray", alpha=0.3, linewidth=0.7, label="episode reward")
+    ax.plot(roll, color="orange", linewidth=2, label=f"rolling mean ({window})")
+    ax.set_xlabel("episode")
+    ax.set_ylabel("reward")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="lower right", fontsize=8)
+    plt.tight_layout()
+    return fig
+
+
+def render_results(room):
     st.subheader("📊 Results")
-    res = st.session_state.results.get(1)
+    res = st.session_state.results.get(room)
     if res is None:
         st.info("Design your grid and press **Train Agent**.")
         return
@@ -411,11 +484,24 @@ def render_results():
         st.metric("Episode reward", f"{res['total_reward']:.1f}")
         st.metric("Steps to exit", len(res["path"]) - 1)
         st.divider()
-        st.write("**Value Iteration**:", res["info_vi"]["iterations"], "iterations")
-        st.write("**Policy Iteration**:", res["info_pi"]["iterations"], "iterations")
-        st.write("Policies match:", "✅" if res["policies_match"] else "⚠️")
-        if res["solved"] and st.session_state.unlocked_room >= 2:
-            st.success("🔓 Room 2 unlocked!")
+        if "info_vi" in res:
+            st.write("**Value Iteration**:", res["info_vi"]["iterations"], "iterations")
+            st.write("**Policy Iteration**:", res["info_pi"]["iterations"], "iterations")
+            st.write("Policies match:", "✅" if res["policies_match"] else "⚠️")
+        else:
+            info = res["info"]
+            st.write(f"**{info['algorithm']}**:", info["episodes"], "episodes trained")
+            st.write("Final ε (exploration):", f"{info['final_epsilon']:.3f}")
+            last = info["reward_history"][-50:]
+            st.write("Avg reward (last 50 ep):", f"{sum(last) / len(last):.1f}")
+        next_room = room + 1
+        if res["solved"] and st.session_state.unlocked_room >= next_room:
+            st.success(f"🔓 Room {next_room} unlocked!")
+
+    if "info" in res and res["info"].get("reward_history"):
+        st.divider()
+        st.subheader("📈 Learning curve")
+        st.pyplot(plot_learning_curve(res["info"]))
 
 
 # ---------------------------------------------------------------------------
@@ -434,16 +520,36 @@ def render_room_nav():
                 st.rerun()
 
 
-def render_room1_header():
-    st.markdown("### 🔴 Room 1 — The Laser Room")
-    st.caption(
+ROOM_HEADERS = {
+    1: (
+        "### 🔴 Room 1 — The Laser Room",
         "A security lab has locked you in. Cameras dead, alarms silent — only the "
         "**control panel** at the far end can shut the system down. A direct line of "
         "**lasers** cuts straight across the floor: fast, but every beam you cross "
         "burns you. A longer corridor hugs the walls, mostly safe — but the floor "
         "there is **slick with coolant**, and it won't always take you where you meant "
-        "to go. Plan the value function. Choose your route."
-    )
+        "to go. Plan the value function. Choose your route.",
+    ),
+    2: (
+        "### 🌉 Room 2 — The Collapsing Bridge",
+        "Whatever got you through the laser room is gone — nobody handed you a "
+        "blueprint of this factory floor. All you can do is walk in, try a route, and "
+        "learn from what happens. The same **walls**, **coolant floors** and hazards "
+        "you can paint on the grid are still here, but this time there's no known "
+        "model to plan against: **SARSA** has to feel its way to the control panel "
+        "through trial and error, on-policy, living with the consequences of every "
+        "risk it takes along the way.",
+    ),
+}
+
+
+def render_room_header(room):
+    header = ROOM_HEADERS.get(room)
+    if header is None:
+        return
+    title, body = header
+    st.markdown(title)
+    st.caption(body)
 
 
 def main():
@@ -456,12 +562,13 @@ def main():
     room = st.session_state.current_room
     params, train_clicked = render_sidebar(room)
 
-    if room == 1:
-        render_room1_header()
+    if room in (1, 2):
+        render_room_header(room)
         render_grid_editor()
         if train_clicked:
-            train_room1(params)
-        render_results()
+            (train_room1 if room == 1 else train_room2)(params)
+            st.rerun()
+        render_results(room)
     else:
         st.info(f"Room {room} — {ROOMS[room-1]['name']} — 🚧 coming soon, we'll build it next.")
 
