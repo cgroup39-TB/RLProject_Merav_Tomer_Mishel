@@ -9,12 +9,14 @@ pair, so there is no way to keep one Q-value per state anymore.
 
 On top of that, crate-shaped obstacles are scattered at random, in new
 positions every single episode, and the agent doesn't see the whole room --
-only a short-range radar (`n_rays` distance readings around it, out to
-`lookahead_m`). Nothing about this room can be memorised; the only thing
-worth learning is a rule about what the radar says ("the reading dead
-ahead is short -> that direction is bad"), which is exactly the kind of
-rule that keeps working in a layout the agent has never seen. That's the
-generalisation test the room is built around.
+only the obstacles within `lookahead_m` metres of it. Each one it can see
+is reported as a (dx, dy) offset, centre-to-centre: from the agent's centre
+to that obstacle's centre. Anything farther than `lookahead_m` is invisible.
+Nothing about this room can be memorised; the only thing worth learning is
+a rule about what's nearby ("something close ahead-right -> that direction
+is bad"), which is exactly the kind of rule that keeps working in a layout
+the agent has never seen. That's the generalisation test the room is built
+around.
 
 Physics runs in fixed 0.02s ticks (DT), but the agent only picks a new
 direction once every `decision_interval` ticks -- that's what an "action"
@@ -43,7 +45,7 @@ class WarehouseRoom:
         n_obstacles=6,
         obstacle_size=0.5,
         lookahead_m=2.0,
-        n_rays=16,
+        max_visible_obstacles=4,
         goal_radius=0.7,
         goal_clearance=2.0,
         decision_interval=25,
@@ -59,7 +61,7 @@ class WarehouseRoom:
         self.n_obstacles = n_obstacles
         self.obstacle_size = obstacle_size
         self.lookahead_m = lookahead_m
-        self.n_rays = n_rays
+        self.max_visible_obstacles = max_visible_obstacles
         self.goal_radius = goal_radius
         self.goal_clearance = goal_clearance
         self.decision_interval = decision_interval
@@ -75,10 +77,6 @@ class WarehouseRoom:
         self.goal = (9.0, 9.0)
         self.rng = np.random.default_rng(seed)
 
-        angles = [2 * math.pi * i / n_rays for i in range(n_rays)]
-        self.ray_directions = np.array([[math.cos(a), math.sin(a)] for a in angles])
-        self.ray_samples = np.arange(0.25, lookahead_m + 0.001, 0.25)
-
         self.obstacles = np.zeros((0, 2))
         self.x = self.y = self.vx = self.vy = 0.0
         self.time = 0.0
@@ -90,7 +88,8 @@ class WarehouseRoom:
 
     @property
     def observation_size(self):
-        return 4 + self.n_rays
+        # x, y, vx, vy + (dx, dy) per visible-obstacle slot + goal (dx, dy)
+        return 4 + 2 * self.max_visible_obstacles + 2
 
     def random_obstacles(self):
         """
@@ -118,28 +117,38 @@ class WarehouseRoom:
         self.obstacles = self.random_obstacles()
         return self.observation()
 
-    def radar(self):
+    def visible_obstacles(self):
         """
-        Distance to the nearest obstacle along each ray, capped at
-        `lookahead_m` ("the way is clear" reading beyond that range).
+        (dx, dy) from the agent's centre to each obstacle's centre, for the
+        `max_visible_obstacles` nearest obstacles within `lookahead_m` --
+        sorted nearest-first. Slots beyond what's actually in range are
+        padded with (lookahead_m, lookahead_m), a fixed "nothing there"
+        sentinel just past the edge of visibility.
         """
+        k = self.max_visible_obstacles
+        sentinel = np.full((k, 2), self.lookahead_m)
         if len(self.obstacles) == 0:
-            return np.full(self.n_rays, self.lookahead_m)
+            return sentinel
 
         here = np.array([self.x, self.y])
-        points = here + self.ray_directions[:, None, :] * self.ray_samples[None, :, None]
+        offsets = self.obstacles - here
+        distances = np.hypot(offsets[:, 0], offsets[:, 1])
+        in_range = distances <= self.lookahead_m
+        offsets, distances = offsets[in_range], distances[in_range]
+        if len(offsets) == 0:
+            return sentinel
 
-        half = self.obstacle_size / 2 + AGENT_RADIUS
-        distance_to_centres = np.abs(points[:, :, None, :] - self.obstacles[None, None, :, :])
-        inside_square = (distance_to_centres <= half).all(axis=3)
-        hit = inside_square.any(axis=2)
-
-        found_something = hit.any(axis=1)
-        first_hop = hit.argmax(axis=1)
-        return np.where(found_something, self.ray_samples[first_hop], self.lookahead_m)
+        order = np.argsort(distances)[:k]
+        visible = offsets[order]
+        out = sentinel.copy()
+        out[: len(visible)] = visible
+        return out
 
     def observation(self):
-        return np.concatenate([[self.x, self.y, self.vx, self.vy], self.radar()])
+        goal_dx = self.goal[0] - self.x
+        goal_dy = self.goal[1] - self.y
+        obstacles = self.visible_obstacles().reshape(-1)
+        return np.concatenate([[self.x, self.y, self.vx, self.vy], obstacles, [goal_dx, goal_dy]])
 
     def hits_obstacle(self):
         if len(self.obstacles) == 0:

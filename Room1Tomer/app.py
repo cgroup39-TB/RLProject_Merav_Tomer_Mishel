@@ -419,8 +419,8 @@ def render_room5_sidebar():
 
         st.subheader("🏭 Warehouse parameters")
         n_obstacles = st.number_input("Number of crates", 0, 20, 6, key="r5_n_obstacles")
-        lookahead_m = st.slider("Radar range (m)", 0.5, 5.0, 2.0, key="r5_lookahead_m")
-        n_rays = st.slider("Radar rays", 4, 32, 16, key="r5_n_rays")
+        lookahead_m = st.slider("Visibility range X (m)", 0.5, 5.0, 2.0, key="r5_lookahead_m")
+        max_visible_obstacles = st.slider("Visible obstacle slots", 1, 8, 4, key="r5_max_visible_obstacles")
         decision_interval = st.slider("Ticks per decision", 5, 50, 25, key="r5_decision_interval")
         max_seconds = st.slider("Max episode time (s)", 5.0, 60.0, 25.0, key="r5_max_seconds")
 
@@ -437,7 +437,7 @@ def render_room5_sidebar():
         st.subheader("Function approximation (tile coding)")
         n_tilings = st.slider("Tilings", 1, 8, 4, key="r5_n_tilings")
         tiles = st.slider("Tiles per side", 4, 20, 10, key="r5_tiles")
-        ray_bins = st.slider("Radar bins per ray", 2, 8, 4, key="r5_ray_bins")
+        obstacle_bins = st.slider("Local grid resolution per obstacle slot", 2, 8, 5, key="r5_obstacle_bins")
 
         st.divider()
         st.subheader("Training Hyperparameters")
@@ -452,11 +452,12 @@ def render_room5_sidebar():
         train_clicked = st.button("▶ Train Agent", type="primary", use_container_width=True)
 
         params = dict(
-            n_obstacles=int(n_obstacles), lookahead_m=lookahead_m, n_rays=int(n_rays),
+            n_obstacles=int(n_obstacles), lookahead_m=lookahead_m,
+            max_visible_obstacles=int(max_visible_obstacles),
             decision_interval=int(decision_interval), max_seconds=max_seconds,
             time_cost=time_cost, progress_reward=progress_reward, reverse_cost=reverse_cost,
             wall_reward=wall_reward, crash_reward=crash_reward, goal_reward=goal_reward,
-            n_tilings=int(n_tilings), tiles=int(tiles), ray_bins=int(ray_bins),
+            n_tilings=int(n_tilings), tiles=int(tiles), obstacle_bins=int(obstacle_bins),
             alpha=alpha, epsilon=epsilon, epsilon_min=epsilon_min,
             epsilon_decay=epsilon_decay, episodes=int(episodes), seed=int(seed),
         )
@@ -761,11 +762,11 @@ def train_room3(params):
 # ---------------------------------------------------------------------------
 # training + results (Room 5 — semi-gradient Q-Learning, Shifting Warehouse)
 # ---------------------------------------------------------------------------
-def train_room5(params):
-    env = WarehouseRoom(
+def build_room5_env(params, seed):
+    return WarehouseRoom(
         n_obstacles=params["n_obstacles"],
         lookahead_m=params["lookahead_m"],
-        n_rays=params["n_rays"],
+        max_visible_obstacles=params["max_visible_obstacles"],
         decision_interval=params["decision_interval"],
         max_seconds=params["max_seconds"],
         time_cost=params["time_cost"],
@@ -774,16 +775,50 @@ def train_room5(params):
         crash_reward=params["crash_reward"],
         progress_reward=params["progress_reward"],
         reverse_cost=params["reverse_cost"],
-        seed=params["seed"],
+        seed=seed,
     )
-    features = Features(
+
+
+def build_room5_features(params):
+    return Features(
         arena_size=10.0,
-        n_rays=env.n_rays,
-        lookahead_m=env.lookahead_m,
+        max_visible_obstacles=params["max_visible_obstacles"],
+        lookahead_m=params["lookahead_m"],
         n_tilings=params["n_tilings"],
         tiles=params["tiles"],
-        ray_bins=params["ray_bins"],
+        obstacle_bins=params["obstacle_bins"],
     )
+
+
+def evaluate_room5(weights, features, params, seed):
+    """
+    Run the greedy policy on a freshly-generated room. Used both right after
+    training (on a layout the training loop never saw) and by the "generate
+    a new test room" button, which re-evaluates the same trained weights on
+    another fresh layout without retraining -- the generalisation test the
+    room is built around.
+    """
+    env = build_room5_env(params, seed)
+    obs = env.reset()
+    active = features.active(obs)
+    path = [(env.x, env.y)]
+    total_reward = 0.0
+    solved = False
+    for _ in range(env.max_decisions):
+        a = greedy_action(weights, active)
+        obs, r, done, _ = env.step(a)
+        active = features.active(obs)
+        total_reward += r
+        path.append((env.x, env.y))
+        if done:
+            solved = env.escaped()
+            break
+    return dict(env=env, path=path, total_reward=total_reward, solved=solved)
+
+
+def train_room5(params):
+    env = build_room5_env(params, seed=params["seed"])
+    features = build_room5_features(params)
     weights, info = train_linear_qlearning(
         env, features, N_ACTIONS,
         episodes=params["episodes"], alpha=params["alpha"], gamma=0.995,
@@ -792,41 +827,11 @@ def train_room5(params):
     )
 
     # The whole point of this room is generalisation, so the reported run
-    # is evaluated greedily on a layout the training loop never saw --
-    # a different obstacle seed, not one of the per-episode training draws.
-    eval_env = WarehouseRoom(
-        n_obstacles=params["n_obstacles"],
-        lookahead_m=params["lookahead_m"],
-        n_rays=params["n_rays"],
-        decision_interval=params["decision_interval"],
-        max_seconds=params["max_seconds"],
-        time_cost=params["time_cost"],
-        goal_reward=params["goal_reward"],
-        wall_reward=params["wall_reward"],
-        crash_reward=params["crash_reward"],
-        progress_reward=params["progress_reward"],
-        reverse_cost=params["reverse_cost"],
-        seed=params["seed"] + 999_983,
-    )
-    obs = eval_env.reset()
-    active = features.active(obs)
-    path = [(eval_env.x, eval_env.y)]
-    total_reward = 0.0
-    solved = False
-    for _ in range(eval_env.max_decisions):
-        a = greedy_action(weights, active)
-        obs, r, done, _ = eval_env.step(a)
-        active = features.active(obs)
-        total_reward += r
-        path.append((eval_env.x, eval_env.y))
-        if done:
-            solved = eval_env.escaped()
-            break
+    # is evaluated greedily on a layout the training loop never saw -- a
+    # different obstacle seed, not one of the per-episode training draws.
+    eval_result = evaluate_room5(weights, features, params, seed=params["seed"] + 999_983)
 
-    st.session_state.results[5] = dict(
-        env=eval_env, weights=weights, info=info,
-        path=path, total_reward=total_reward, solved=solved,
-    )
+    st.session_state.results[5] = dict(weights=weights, features=features, params=dict(params), info=info, **eval_result)
 
 
 def plot_result(res):
@@ -1012,8 +1017,7 @@ def render_room3_results():
     st.pyplot(plot_learning_curve(res["info"]))
 
 
-def plot_room5_result(res):
-    env = res["env"]
+def plot_room5_result(env, path=None):
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.add_patch(plt.Rectangle((0, 0), 10, 10, fill=False, edgecolor="black", linewidth=1.5))
 
@@ -1029,10 +1033,11 @@ def plot_room5_result(res):
     ax.text(start_x, start_y, "S", ha="center", va="center", color="lime", fontweight="bold",
             bbox=dict(boxstyle="circle", facecolor="black", edgecolor="lime"))
 
-    xs = [p[0] for p in res["path"]]
-    ys = [p[1] for p in res["path"]]
-    ax.plot(xs, ys, color="orange", linewidth=2, zorder=4)
-    ax.plot(xs[-1], ys[-1], marker="o", markersize=10, color="orange", markeredgecolor="black", zorder=5)
+    if path and len(path) > 1:
+        xs = [p[0] for p in path]
+        ys = [p[1] for p in path]
+        ax.plot(xs, ys, color="orange", linewidth=2, zorder=4)
+        ax.plot(xs[-1], ys[-1], marker="o", markersize=10, color="orange", markeredgecolor="black", zorder=5)
 
     ax.set_xlim(-0.5, 10.5)
     ax.set_ylim(-0.5, 10.5)
@@ -1040,6 +1045,27 @@ def plot_room5_result(res):
     ax.set_xticks([]); ax.set_yticks([])
     plt.tight_layout()
     return fig
+
+
+def render_room5_preview(params):
+    """
+    The room board, shown before training -- same spot Rooms 1-3 show their
+    grid editor. Obstacles are randomised every episode by design, so this
+    is just one sample layout at the current settings, reshuffled on demand.
+    """
+    st.subheader("🗺️ Room layout")
+    st.caption(
+        "10×10 metres, 0.5m crates. Obstacle count and position are dynamic -- "
+        "a fresh layout like this is drawn at the start of every episode."
+    )
+    shuffle_clicked = st.button("🎲 Shuffle preview", key="room5_shuffle")
+    stale = st.session_state.get("room5_preview_n") != params["n_obstacles"]
+    if "room5_preview_env" not in st.session_state or stale or shuffle_clicked:
+        preview_env = build_room5_env(params, seed=None)
+        preview_env.reset()
+        st.session_state.room5_preview_env = preview_env
+        st.session_state.room5_preview_n = params["n_obstacles"]
+    st.pyplot(plot_room5_result(st.session_state.room5_preview_env))
 
 
 def render_room5_results():
@@ -1051,7 +1077,7 @@ def render_room5_results():
 
     c1, c2 = st.columns([2, 1])
     with c1:
-        st.pyplot(plot_room5_result(res))
+        st.pyplot(plot_room5_result(res["env"], res["path"]))
         st.caption(
             "Evaluated greedily on a crate layout the training loop never saw -- "
             "this is the generalisation test the room is built around."
@@ -1066,6 +1092,12 @@ def render_room5_results():
         st.write("Final ε (exploration):", f"{info['final_epsilon']:.3f}")
         last = info["reward_history"][-50:]
         st.write("Avg reward (last 50 ep):", f"{sum(last) / len(last):.1f}")
+        st.divider()
+        if st.button("🎲 Generate new test room & evaluate", use_container_width=True):
+            new_seed = int(np.random.default_rng().integers(0, 2**31 - 1))
+            new_eval = evaluate_room5(res["weights"], res["features"], res["params"], seed=new_seed)
+            st.session_state.results[5] = dict(res, **new_eval)
+            st.rerun()
         if res["solved"]:
             st.success("🏆 Every built room cleared!")
 
@@ -1127,17 +1159,19 @@ ROOM_HEADERS = {
     5: (
         "### 🏭 Room 5 — The Shifting Warehouse",
         "The last built sector is the loading warehouse, and its stacking robots "
-        "never stopped working: 0.5-metre **crates** stand somewhere new at the "
-        "start of every single run. There's no grid to memorise here, and no fixed "
-        "map to plan against — the room is 10x10 **metres** of open floor, and you "
-        "can't even see it: all you get is a short-range **radar**, a handful of "
-        "distance readings around you. A table of Q-values has no row for "
+        "never stopped working: 0.5-metre **crates** stand somewhere new, in "
+        "different numbers, at the start of every single run. There's no grid to "
+        "memorise here, and no fixed map to plan against — the room is 10x10 "
+        "**metres** of open floor, and you can't see all of it: only the crates "
+        "within **X metres** of you, each reported as an offset straight from your "
+        "centre to that crate's centre. A table of Q-values has no row for "
         "'standing at (x=3.7, y=8.1)', so a **linear model** takes its place — "
-        "weights over tile-coded position and speed, plus radar-distance bins, "
-        "learned with semi-gradient Q-Learning. Learning a *route* is useless "
-        "here; the only thing worth learning is a *rule* about what the radar "
-        "says — and that's what lets it reach the exit in a crate layout it has "
-        "never seen before.",
+        "weights over tile-coded position and speed, plus a small local grid per "
+        "nearby crate, learned with semi-gradient Q-Learning. Learning a *route* "
+        "is useless here; the only thing worth learning is a *rule* about what's "
+        "nearby — and that's what lets it reach the exit in a crate layout it has "
+        "never seen before, tested here by conjuring a brand new room after "
+        "training and watching the policy try it cold.",
     ),
 }
 
@@ -1167,6 +1201,7 @@ def main():
     if room == 5:
         params, train_clicked = render_room5_sidebar()
         render_room_header(room)
+        render_room5_preview(params)
         if train_clicked:
             with st.spinner(f"Training for {params['episodes']} episodes..."):
                 train_room5(params)
