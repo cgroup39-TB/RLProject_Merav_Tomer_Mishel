@@ -14,11 +14,12 @@ import matplotlib.pyplot as plt
 import streamlit as st
 
 from grid_env import (
-    GridConfig, GridWorldEnv, Cell, ACTION_ARROWS, default_config,
-    SLIP_DIR_MODES, SLIP_DIR_LABELS,
+    GridConfig, GridWorldEnv, EnergyRoomEnv, Cell, ACTION_ARROWS, default_config,
+    default_room3_config, SLIP_DIR_MODES, SLIP_DIR_LABELS,
 )
 from dp_solver import value_iteration, policy_iteration
 from sarsa_solver import sarsa
+from qlearning_solver import q_learning
 
 
 st.set_page_config(page_title="Escape Room RL", page_icon="🗝️", layout="wide")
@@ -40,6 +41,49 @@ CELL_ICON = {
     Cell.GOAL: "🖥️",
     Cell.TRAP: "☠",
     Cell.START: "🚦",
+}
+
+# Room 3 (Energy Room) has its own grid, its own paint palette (battery,
+# switches, guard patrol, ...) and its own fixed 10x10 layout, so it keeps a
+# separate tool/icon table rather than overloading Room 1/2's shared one.
+ROOM3_TOOL_LABELS = {
+    Cell.EMPTY: "· Empty",
+    Cell.WALL: "🧱 Wall",
+    Cell.START: "🚦 Start",
+    Cell.GOAL: "🚪 Exit (locked)",
+    Cell.BATTERY: "🔋 Battery",
+    Cell.SWITCH_BLUE: "🔵 Blue Switch",
+    Cell.SWITCH_RED: "🔴 Red Switch",
+    Cell.DOOR: "🚧 Door (opens after blue switch)",
+    Cell.SHORTCUT: "⚡ Shortcut (needs battery)",
+    Cell.CHARGER: "🔌 Charging Station",
+    Cell.ELECTRIC_TRAP: "🌩️ Electric Trap (live on even steps)",
+    Cell.TRAP: "☠ Trap",
+    "guard": "🤖 Guard Patrol (click cells in order)",
+}
+ROOM3_CELL_ICON = {
+    Cell.EMPTY: "",
+    Cell.WALL: "🧱",
+    Cell.START: "🚦",
+    Cell.GOAL: "🚪",
+    Cell.BATTERY: "🔋",
+    Cell.SWITCH_BLUE: "🔵",
+    Cell.SWITCH_RED: "🔴",
+    Cell.DOOR: "🚧",
+    Cell.SHORTCUT: "⚡",
+    Cell.CHARGER: "🔌",
+    Cell.ELECTRIC_TRAP: "🌩️",
+    Cell.TRAP: "☠",
+}
+ROOM3_LETTERS = {
+    Cell.BATTERY: ("K", "gold"),
+    Cell.SWITCH_BLUE: ("B", "deepskyblue"),
+    Cell.SWITCH_RED: ("R", "red"),
+    Cell.DOOR: ("D", "orange"),
+    Cell.SHORTCUT: ("H", "aquamarine"),
+    Cell.CHARGER: ("C", "lime"),
+    Cell.ELECTRIC_TRAP: ("E", "violet"),
+    Cell.TRAP: ("X", "orangered"),
 }
 
 ROOMS = [
@@ -73,6 +117,13 @@ def init_state():
     st.session_state.current_room = 1
     st.session_state.unlocked_room = 1
     st.session_state.results = {}
+
+    r3_default = default_room3_config()
+    st.session_state.room3_grid_cells = dict(r3_default.cells)
+    st.session_state.room3_start = r3_default.start
+    st.session_state.room3_goal = r3_default.goal
+    st.session_state.room3_guard_path = list(r3_default.guard_path)
+    st.session_state.room3_paint_tool = Cell.EMPTY
 
 
 init_state()
@@ -142,6 +193,78 @@ def render_grid_editor():
                         cell_label(r, c) or " ",
                         key=f"cell_{r}_{c}",
                         on_click=paint_cell,
+                        args=(r, c),
+                        use_container_width=True,
+                    )
+
+
+# ---------------------------------------------------------------------------
+# grid editing — Room 3 (its own grid, its own palette, fixed 10x10)
+# ---------------------------------------------------------------------------
+def paint_room3_cell(r, c):
+    tool = st.session_state.room3_paint_tool
+    if tool == "guard":
+        path = st.session_state.room3_guard_path
+        if (r, c) in path:
+            path.remove((r, c))
+        else:
+            path.append((r, c))
+        return
+    if tool == Cell.START:
+        old = st.session_state.room3_start
+        st.session_state.room3_grid_cells.pop(old, None)
+        st.session_state.room3_start = (r, c)
+        st.session_state.room3_grid_cells.pop((r, c), None)
+    elif tool == Cell.GOAL:
+        old = st.session_state.room3_goal
+        st.session_state.room3_grid_cells.pop(old, None)
+        st.session_state.room3_goal = (r, c)
+        st.session_state.room3_grid_cells[(r, c)] = Cell.GOAL
+    elif tool == Cell.EMPTY:
+        st.session_state.room3_grid_cells.pop((r, c), None)
+    else:
+        if (r, c) not in (st.session_state.room3_start, st.session_state.room3_goal):
+            st.session_state.room3_grid_cells[(r, c)] = tool
+
+
+def build_room3_config():
+    return GridConfig(
+        rows=10,
+        cols=10,
+        cells=dict(st.session_state.room3_grid_cells),
+        start=st.session_state.room3_start,
+        goal=st.session_state.room3_goal,
+        guard_path=list(st.session_state.room3_guard_path),
+    )
+
+
+def room3_cell_label(r, c):
+    if (r, c) == st.session_state.room3_start:
+        return "🚦"
+    if (r, c) == st.session_state.room3_goal:
+        return "🚪"
+    if (r, c) in st.session_state.room3_guard_path:
+        return f"🤖{st.session_state.room3_guard_path.index((r, c)) + 1}"
+    t = st.session_state.room3_grid_cells.get((r, c), Cell.EMPTY)
+    return ROOM3_CELL_ICON.get(t, "")
+
+
+def render_room3_grid_editor():
+    st.subheader("📖 Grid Editor")
+    tool = st.session_state.room3_paint_tool
+    st.caption(
+        f"Active tool: **{ROOM3_TOOL_LABELS[tool]}** — click a cell to paint. "
+        "Guard tool: click cells in patrol order, click a numbered cell again to remove it."
+    )
+    for r in range(10):
+        cols = st.columns(10)
+        for c in range(10):
+            with cols[c]:
+                with st.container(key=f"r3cellwrap_{r}_{c}"):
+                    st.button(
+                        room3_cell_label(r, c) or " ",
+                        key=f"r3cell_{r}_{c}",
+                        on_click=paint_room3_cell,
                         args=(r, c),
                         use_container_width=True,
                     )
@@ -222,6 +345,58 @@ def inject_grid_css():
     st.html("<style>\n" + "\n".join(rules) + "\n</style>")
 
 
+ROOM3_CELL_TYPE_CSS = {
+    Cell.WALL: CELL_TYPE_CSS[Cell.WALL],
+    Cell.TRAP: CELL_TYPE_CSS[Cell.TRAP],
+    Cell.BATTERY: (
+        "background: radial-gradient(circle, #ffe066, #a67c00) !important; "
+        "border-color: #fff2b0 !important;"
+    ),
+    Cell.SWITCH_BLUE: (
+        "background: radial-gradient(circle, #4fa8ff, #0b3d91) !important; "
+        "border-color: #9fd0ff !important;"
+    ),
+    Cell.SWITCH_RED: (
+        "background: radial-gradient(circle, #ff5b5b, #7a0000) !important; "
+        "border-color: #ff8080 !important;"
+    ),
+    Cell.DOOR: (
+        "background: repeating-linear-gradient(45deg, #b8860b, #b8860b 4px, "
+        "#8a6508 4px, #8a6508 8px) !important; border-color: #ffd27f !important;"
+    ),
+    Cell.SHORTCUT: (
+        "background: linear-gradient(160deg, #7dffe0, #0aa88a) !important; "
+        "border-color: #baffef !important;"
+    ),
+    Cell.CHARGER: (
+        "background: radial-gradient(circle, #7dff8a, #0a5c2e) !important; "
+        "border-color: #b8ffc2 !important;"
+    ),
+    Cell.ELECTRIC_TRAP: (
+        "background: radial-gradient(circle, #d9a6ff, #4b0082) !important; "
+        "border-color: #e8caff !important; animation: laserpulse 1.1s ease-in-out infinite;"
+    ),
+}
+GUARD_PATH_CSS = "outline: 3px solid #ff2e2e !important; outline-offset: -3px;"
+
+
+def inject_room3_css():
+    rules = [CHROME_CSS]
+    for (r, c), cell_type in st.session_state.room3_grid_cells.items():
+        if (r, c) in (st.session_state.room3_start, st.session_state.room3_goal):
+            continue
+        style = ROOM3_CELL_TYPE_CSS.get(cell_type)
+        if style:
+            rules.append(f".st-key-r3cellwrap_{r}_{c} button {{ {style} }}")
+    for (r, c) in st.session_state.room3_guard_path:
+        rules.append(f".st-key-r3cellwrap_{r}_{c} button {{ {GUARD_PATH_CSS} }}")
+    sr, sc = st.session_state.room3_start
+    gr, gc = st.session_state.room3_goal
+    rules.append(f".st-key-r3cellwrap_{sr}_{sc} button {{ {START_CSS} }}")
+    rules.append(f".st-key-r3cellwrap_{gr}_{gc} button {{ {GOAL_CSS} }}")
+    st.html("<style>\n" + "\n".join(rules) + "\n</style>")
+
+
 # ---------------------------------------------------------------------------
 # sidebar
 # ---------------------------------------------------------------------------
@@ -229,47 +404,71 @@ def render_sidebar(current_room):
     with st.sidebar:
         st.header("🎮 Game Setup")
 
-        st.subheader("Grid size")
-        col1, col2 = st.columns(2)
-        rows = col1.number_input("Rows", min_value=3, max_value=20, value=st.session_state.rows)
-        cols = col2.number_input("Cols", min_value=3, max_value=20, value=st.session_state.cols)
-        b1, b2 = st.columns(2)
-        if b1.button("Resize", use_container_width=True):
-            st.session_state.rows, st.session_state.cols = int(rows), int(cols)
-            st.session_state.start = (0, 0)
-            st.session_state.goal = (int(rows) - 1, int(cols) - 1)
-            st.session_state.grid_cells = {st.session_state.goal: Cell.GOAL}
-            st.session_state.cell_rewards = {}
-            st.session_state.cell_slip_prob = {}
-            st.session_state.cell_slip_dir = {}
-            st.rerun()
-        if b2.button("Clear", use_container_width=True):
-            st.session_state.grid_cells = {st.session_state.goal: Cell.GOAL}
-            st.session_state.cell_rewards = {}
-            st.session_state.cell_slip_prob = {}
-            st.session_state.cell_slip_dir = {}
-            st.rerun()
+        if current_room == 3:
+            st.subheader("Grid")
+            st.caption("10×10, fixed layout (hand-designed for the Energy Room).")
+            if st.button("↺ Reset to default layout", use_container_width=True):
+                r3_default = default_room3_config()
+                st.session_state.room3_grid_cells = dict(r3_default.cells)
+                st.session_state.room3_start = r3_default.start
+                st.session_state.room3_goal = r3_default.goal
+                st.session_state.room3_guard_path = list(r3_default.guard_path)
+                st.rerun()
 
-        st.divider()
-        st.subheader("Paint tool & rewards")
-        tool = st.radio(
-            "Active tool",
-            options=list(TOOL_LABELS.keys()),
-            format_func=lambda t: TOOL_LABELS[t],
-            key="paint_tool",
-            label_visibility="collapsed",
-        )
-        if tool == Cell.SLIPPERY:
-            st.slider(
-                "Slip probability for this cell", 0.0, 1.0,
-                key="paint_slip_prob",
+            st.divider()
+            st.subheader("Paint tool")
+            st.radio(
+                "Active tool",
+                options=list(ROOM3_TOOL_LABELS.keys()),
+                format_func=lambda t: ROOM3_TOOL_LABELS[t],
+                key="room3_paint_tool",
+                label_visibility="collapsed",
             )
-            st.selectbox(
-                "Slip direction for this cell",
-                options=SLIP_DIR_MODES,
-                format_func=lambda m: SLIP_DIR_LABELS[m],
-                key="paint_slip_dir",
+            if st.session_state.room3_guard_path:
+                order = " → ".join(f"({r},{c})" for r, c in st.session_state.room3_guard_path)
+                st.caption(f"🤖 Patrol order: {order}")
+        else:
+            st.subheader("Grid size")
+            col1, col2 = st.columns(2)
+            rows = col1.number_input("Rows", min_value=3, max_value=20, value=st.session_state.rows)
+            cols = col2.number_input("Cols", min_value=3, max_value=20, value=st.session_state.cols)
+            b1, b2 = st.columns(2)
+            if b1.button("Resize", use_container_width=True):
+                st.session_state.rows, st.session_state.cols = int(rows), int(cols)
+                st.session_state.start = (0, 0)
+                st.session_state.goal = (int(rows) - 1, int(cols) - 1)
+                st.session_state.grid_cells = {st.session_state.goal: Cell.GOAL}
+                st.session_state.cell_rewards = {}
+                st.session_state.cell_slip_prob = {}
+                st.session_state.cell_slip_dir = {}
+                st.rerun()
+            if b2.button("Clear", use_container_width=True):
+                st.session_state.grid_cells = {st.session_state.goal: Cell.GOAL}
+                st.session_state.cell_rewards = {}
+                st.session_state.cell_slip_prob = {}
+                st.session_state.cell_slip_dir = {}
+                st.rerun()
+
+            st.divider()
+            st.subheader("Paint tool & rewards")
+            tool = st.radio(
+                "Active tool",
+                options=list(TOOL_LABELS.keys()),
+                format_func=lambda t: TOOL_LABELS[t],
+                key="paint_tool",
+                label_visibility="collapsed",
             )
+            if tool == Cell.SLIPPERY:
+                st.slider(
+                    "Slip probability for this cell", 0.0, 1.0,
+                    key="paint_slip_prob",
+                )
+                st.selectbox(
+                    "Slip direction for this cell",
+                    options=SLIP_DIR_MODES,
+                    format_func=lambda m: SLIP_DIR_LABELS[m],
+                    key="paint_slip_dir",
+                )
 
         st.markdown("**Step reward**")
         step_reward = st.number_input("Step", value=-1.0, step=0.1, key="step_reward")
@@ -281,14 +480,30 @@ def render_sidebar(current_room):
         gamma = st.slider("Discount γ", 0.0, 0.999, 0.95, key="gamma")
         seed = st.number_input("Random seed", min_value=0, value=0, step=1, key="seed")
 
-        st.divider()
-        st.subheader("Hazard penalty")
-        laser_reward = st.number_input("🔴 Laser penalty", value=-20.0, step=5.0, key="laser_reward")
+        room3_extra = {}
+        if current_room == 3:
+            st.divider()
+            st.subheader("⚡ Energy Room rewards")
+            room3_extra["wall_penalty"] = st.number_input("🧱 Wall bump penalty", value=-2.0, step=0.5, key="r3_wall_penalty")
+            room3_extra["guard_penalty"] = st.number_input("🤖 Guard collision penalty", value=-30.0, step=5.0, key="r3_guard_penalty")
+            room3_extra["electric_trap_reward"] = st.number_input("🌩️ Electric trap penalty", value=-20.0, step=5.0, key="r3_electric_trap_reward")
+            room3_extra["battery_reward"] = st.number_input("🔋 Battery pickup bonus", value=15.0, step=5.0, key="r3_battery_reward")
+            room3_extra["switch_blue_reward"] = st.number_input("🔵 Blue switch bonus", value=20.0, step=5.0, key="r3_switch_blue_reward")
+            room3_extra["switch_red_reward"] = st.number_input("🔴 Red switch bonus", value=25.0, step=5.0, key="r3_switch_red_reward")
+            room3_extra["charger_reward"] = st.number_input("🔌 Charging station bonus (one-time)", value=5.0, step=1.0, key="r3_charger_reward")
+            room3_extra["incomplete_exit_reward"] = st.number_input("🚪 Premature-exit penalty", value=-10.0, step=5.0, key="r3_incomplete_exit_reward")
+            goal_reward = st.number_input("✅ Successful-exit reward", value=150.0, step=10.0, key="r3_goal_reward")
+            trap_reward = st.number_input("☠ Trap penalty", value=-100.0, step=5.0, key="r3_trap_reward")
+            laser_reward = -20.0
+        else:
+            st.divider()
+            st.subheader("Hazard penalty")
+            laser_reward = st.number_input("🔴 Laser penalty", value=-20.0, step=5.0, key="laser_reward")
 
-        st.divider()
-        st.subheader("Terminal rewards")
-        goal_reward = st.number_input("Goal reward", value=100.0, step=5.0, key="goal_reward")
-        trap_reward = st.number_input("Trap reward", value=-100.0, step=5.0, key="trap_reward")
+            st.divider()
+            st.subheader("Terminal rewards")
+            goal_reward = st.number_input("Goal reward", value=100.0, step=5.0, key="goal_reward")
+            trap_reward = st.number_input("Trap reward", value=-100.0, step=5.0, key="trap_reward")
 
         extra = {}
         if current_room in (2, 3):
@@ -313,6 +528,7 @@ def render_sidebar(current_room):
             laser_reward=laser_reward, seed=int(seed),
         )
         params.update(extra)
+        params.update(room3_extra)
         return params, train_clicked
 
 
@@ -413,6 +629,72 @@ def train_room2(params):
         st.session_state.unlocked_room = max(st.session_state.unlocked_room, 3)
 
 
+# ---------------------------------------------------------------------------
+# training + results (Room 3 — Q-Learning, Energy Room)
+# ---------------------------------------------------------------------------
+def train_room3(params):
+    cfg = build_room3_config()
+    env = EnergyRoomEnv(
+        cfg,
+        guard_path=cfg.guard_path,
+        slip_prob=params["slip_prob"],
+        step_reward=params["step_reward"],
+        goal_reward=params["goal_reward"],
+        trap_reward=params["trap_reward"],
+        laser_reward=params["laser_reward"],
+        gamma=params["gamma"],
+        potential_shaping=params["shaping"],
+        seed=params["seed"],
+        battery_reward=params["battery_reward"],
+        switch_blue_reward=params["switch_blue_reward"],
+        switch_red_reward=params["switch_red_reward"],
+        guard_penalty=params["guard_penalty"],
+        wall_penalty=params["wall_penalty"],
+        electric_trap_reward=params["electric_trap_reward"],
+        charger_reward=params["charger_reward"],
+        incomplete_exit_reward=params["incomplete_exit_reward"],
+    )
+    Q, policy, info = q_learning(
+        env,
+        env.n_states,
+        env.n_actions,
+        episodes=params["episodes"],
+        alpha=params["alpha"],
+        gamma=params["gamma"],
+        epsilon=params["epsilon"],
+        epsilon_min=params["epsilon_min"],
+        epsilon_decay=params["epsilon_decay"],
+        max_steps=env.max_steps,
+        seed=params["seed"],
+    )
+
+    s = env.reset()
+    path = [env.decode_flags(s)[0]]
+    total_reward = 0.0
+    solved = False
+    for _ in range(env.max_steps):
+        a = int(policy[s])
+        s, r, done, truncated, _ = env.step(a)
+        total_reward += r
+        path.append(env.decode_flags(s)[0])
+        if done:
+            pos, has_battery, blue_on, red_on = env.decode_flags(s)
+            solved = pos == env.cfg.goal and has_battery and blue_on and red_on
+            break
+        if truncated:
+            break
+
+    st.session_state.results[3] = dict(
+        env=env, Q=Q, policy=policy, info=info,
+        path=path, total_reward=total_reward, solved=solved,
+    )
+    if solved:
+        # Room 4 (Function Approximation) isn't built yet in this app, so
+        # solving the Energy Room unlocks the next room that actually
+        # exists -- Room 5 -- rather than dead-ending on a "coming soon" gate.
+        st.session_state.unlocked_room = max(st.session_state.unlocked_room, 5)
+
+
 def plot_result(res):
     env = res["env"]
     V = res["V"].reshape(env.rows, env.cols)
@@ -504,6 +786,98 @@ def render_results(room):
         st.pyplot(plot_learning_curve(res["info"]))
 
 
+ROOM3_FLAG_COMBOS = [
+    (False, False, False),
+    (True, False, False),
+    (True, True, False),
+    (True, True, True),
+]
+ROOM3_FLAG_LABELS = {
+    (False, False, False): "○ Nothing collected yet",
+    (True, False, False): "🔋 Battery only",
+    (True, True, False): "🔋🔵 Battery + Blue switch",
+    (True, True, True): "🔋🔵🔴 All three (ready to exit)",
+}
+
+
+def plot_room3_result(res, flags):
+    env = res["env"]
+    Q = res["Q"]
+    bits = (int(flags[0]) << 2) | (int(flags[1]) << 1) | int(flags[2])
+    rows, cols = env.rows, env.cols
+    V = np.zeros((rows, cols))
+    policy = np.zeros((rows, cols), dtype=int)
+    for r in range(rows):
+        for c in range(cols):
+            idx = (r * cols + c) * 8 + bits
+            V[r, c] = Q[idx].max()
+            policy[r, c] = int(Q[idx].argmax())
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    im = ax.imshow(V, cmap="viridis")
+    fig.colorbar(im, ax=ax, label="V(s)", fraction=0.046)
+
+    for r in range(rows):
+        for c in range(cols):
+            t = env.cfg.cell_type(r, c)
+            if (r, c) == env.cfg.goal:
+                ax.text(c, r, "G", ha="center", va="center", color="red", fontweight="bold")
+            elif (r, c) == env.cfg.start:
+                ax.text(c, r, "S", ha="center", va="center", color="lime", fontweight="bold")
+            elif t == Cell.WALL:
+                ax.add_patch(plt.Rectangle((c - 0.5, r - 0.5), 1, 1, color="black"))
+            elif t in ROOM3_LETTERS:
+                letter, color = ROOM3_LETTERS[t]
+                ax.text(c, r, letter, ha="center", va="center", color=color, fontweight="bold")
+            else:
+                a = policy[r, c]
+                ax.text(c, r, ACTION_ARROWS[a], ha="center", va="center", color="white", fontsize=9)
+
+    for (gr, gc) in set(env._guard_cycle):
+        ax.add_patch(plt.Circle((gc, gr), 0.14, facecolor="none", edgecolor="magenta", linewidth=1.6, zorder=6))
+
+    path_r = [p[0] for p in res["path"]]
+    path_c = [p[1] for p in res["path"]]
+    ax.plot(path_c, path_r, color="orange", linewidth=2, marker="o", markersize=3, zorder=5)
+    ax.set_xticks([]); ax.set_yticks([])
+    plt.tight_layout()
+    return fig
+
+
+def render_room3_results():
+    st.subheader("📊 Results")
+    res = st.session_state.results.get(3)
+    if res is None:
+        st.info("Design your grid and press **Train Agent**.")
+        return
+
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        flags = st.selectbox(
+            "Value/policy view",
+            options=ROOM3_FLAG_COMBOS,
+            format_func=lambda f: ROOM3_FLAG_LABELS[f],
+        )
+        st.pyplot(plot_room3_result(res, flags))
+        st.caption("Magenta rings mark the guard robot's patrol cells.")
+    with c2:
+        st.metric("Reached goal?", "✅ Yes" if res["solved"] else "❌ No")
+        st.metric("Episode reward", f"{res['total_reward']:.1f}")
+        st.metric("Steps to exit", len(res["path"]) - 1)
+        st.divider()
+        info = res["info"]
+        st.write(f"**{info['algorithm']}**:", info["episodes"], "episodes trained")
+        st.write("Final ε (exploration):", f"{info['final_epsilon']:.3f}")
+        last = info["reward_history"][-50:]
+        st.write("Avg reward (last 50 ep):", f"{sum(last) / len(last):.1f}")
+        if res["solved"] and st.session_state.unlocked_room >= 5:
+            st.success("🔓 Room 5 unlocked!")
+
+    st.divider()
+    st.subheader("📈 Learning curve")
+    st.pyplot(plot_learning_curve(res["info"]))
+
+
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
@@ -540,6 +914,20 @@ ROOM_HEADERS = {
         "through trial and error, on-policy, living with the consequences of every "
         "risk it takes along the way.",
     ),
+    3: (
+        "### ⚡ Room 3 — The Energy Room",
+        "The blast door won't budge on batteries alone. This is a machine room — "
+        "cable-strewn floors, humming **generators** in blue and red, and a "
+        "**guard robot** pacing a fixed beat down the only corridor south. Reaching "
+        "the exit isn't the job: you need to find the **battery** tucked away from "
+        "the direct route, throw the **blue switch** it powers, and only then can "
+        "the **red switch** — and the door behind it — do anything at all. An "
+        "**electric trap** flickers along the guard's corridor, live only every "
+        "other step, and a battery-powered **shortcut** cuts through the wall for "
+        "whoever's already found one. Q-Learning always assumes the best possible "
+        "continuation, so it plans the full battery → blue → red → exit route even "
+        "while it's still bumping into walls.",
+    ),
 }
 
 
@@ -553,13 +941,13 @@ def render_room_header(room):
 
 
 def main():
-    inject_grid_css()
+    room = st.session_state.current_room
+    inject_room3_css() if room == 3 else inject_grid_css()
     st.title("🗝️ Escape Room RL")
     st.caption("Design your environment, choose an algorithm, and watch the agent escape.")
     render_room_nav()
     st.divider()
 
-    room = st.session_state.current_room
     params, train_clicked = render_sidebar(room)
 
     if room in (1, 2):
@@ -569,6 +957,13 @@ def main():
             (train_room1 if room == 1 else train_room2)(params)
             st.rerun()
         render_results(room)
+    elif room == 3:
+        render_room_header(room)
+        render_room3_grid_editor()
+        if train_clicked:
+            train_room3(params)
+            st.rerun()
+        render_room3_results()
     else:
         st.info(f"Room {room} — {ROOMS[room-1]['name']} — 🚧 coming soon, we'll build it next.")
 
