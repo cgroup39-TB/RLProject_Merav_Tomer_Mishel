@@ -52,12 +52,6 @@ class DecelZone(Rect):
     drag_coeff: float = 1.0
 
 
-# Gates are static obstacles, same collision behavior as walls -- kept as a
-# separate DroneConfig field (rather than folded into `walls`) purely so the
-# canvas can theme them differently (a "danger" red, matching the Gate
-# Gauntlet preset's narrative) from ordinary factory walls.
-
-
 @dataclass
 class Pad:
     x: float
@@ -79,7 +73,6 @@ class DroneConfig:
     wind_zones: list = field(default_factory=list)
     accel_zones: list = field(default_factory=list)
     decel_zones: list = field(default_factory=list)
-    gates: list = field(default_factory=list)
 
 
 class DroneEnv:
@@ -192,12 +185,6 @@ class DroneEnv:
                     crashed = True
                     break
 
-        if not crashed:
-            for g in self.cfg.gates:
-                if g.circle_overlaps(x_new, y_new, self.drone_radius):
-                    crashed = True
-                    break
-
         speed_new = float(np.hypot(vx, vy))
 
         if not crashed:
@@ -226,7 +213,6 @@ class DroneEnv:
             landed=landed,
             speed=speed_new,
             wind=wind_vec,
-            gate_positions=[(r.x + r.w / 2, r.y + r.h / 2) for r in self.cfg.gates],
             t=self._t,
         )
         return self._state.copy(), float(reward), bool(done), bool(truncated), info

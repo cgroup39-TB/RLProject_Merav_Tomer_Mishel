@@ -40,7 +40,6 @@ init_state()
 # ---------------------------------------------------------------------------
 def build_drone_config(params):
     walls = [Rect(w["x"], w["y"], w["w"], w["h"]) for w in params["walls"]]
-    gates = [Rect(g["x"], g["y"], g["w"], g["h"]) for g in params["gates"]]
     wind_zones = []
     if params["wind_scale"] > 0:
         # one fixed zone covering the middle of the room; strength scales
@@ -51,7 +50,6 @@ def build_drone_config(params):
         start=(1.0, 1.0),
         pad=Pad(7.5, 7.5, params["pad_radius"]),
         walls=walls,
-        gates=gates,
         wind_zones=wind_zones,
     )
 
@@ -81,11 +79,12 @@ def render_sidebar():
 
         st.divider()
         st.subheader("Room layout")
-        st.caption("Room is 10×10m. (x,y) = a wall/gate's bottom-left corner; (w,h) = its size.")
+        st.caption("Room is 10×10m. (x,y) = a wall's bottom-left corner; (w,h) = its size. "
+                   "Walls are drawn as red \"danger gates\" — colliding with one is a crash.")
         n_walls = st.number_input("Number of walls", min_value=0, max_value=6, value=0, step=1, key="n_walls")
         walls = []
         for i in range(int(n_walls)):
-            with st.expander(f"🧱 Wall {i + 1}", expanded=True):
+            with st.expander(f"🔴 Wall {i + 1}", expanded=True):
                 c1, c2 = st.columns(2)
                 x = c1.number_input("x", 0.0, 9.5, 4.0, step=0.5, key=f"wall_{i}_x")
                 y = c2.number_input("y", 0.0, 9.5, 0.0, step=0.5, key=f"wall_{i}_y")
@@ -93,18 +92,6 @@ def render_sidebar():
                 w = c3.number_input("width", 0.2, 10.0, 1.0, step=0.2, key=f"wall_{i}_w")
                 h = c4.number_input("height", 0.2, 10.0, 3.0, step=0.2, key=f"wall_{i}_h")
                 walls.append({"x": x, "y": y, "w": w, "h": h})
-
-        n_gates = st.number_input("Number of gates", min_value=0, max_value=4, value=0, step=1, key="n_gates")
-        gates = []
-        for i in range(int(n_gates)):
-            with st.expander(f"🔴 Gate {i + 1}", expanded=True):
-                c1, c2 = st.columns(2)
-                x = c1.number_input("x", 0.0, 9.5, 4.0, step=0.5, key=f"gate_{i}_x")
-                y = c2.number_input("y", 0.0, 9.5, 4.0, step=0.5, key=f"gate_{i}_y")
-                c3, c4 = st.columns(2)
-                w = c3.number_input("width", 0.2, 10.0, 0.4, step=0.2, key=f"gate_{i}_w")
-                h = c4.number_input("height", 0.2, 10.0, 2.0, step=0.2, key=f"gate_{i}_h")
-                gates.append({"x": x, "y": y, "w": w, "h": h})
 
         wind_scale = st.slider(
             "Wind strength ×", 0.0, 3.0, 0.0, key="wind_scale",
@@ -127,7 +114,7 @@ def render_sidebar():
         )
         drone_radius = st.slider(
             "Drone radius (m)", 0.05, 0.5, 0.15, key="drone_radius",
-            help="Collision radius used for wall/gate/room-boundary/pad checks — the drone is modeled "
+            help="Collision radius used for wall/room-boundary/pad checks — the drone is modeled "
                  "as a circle, not a single point.",
         )
 
@@ -160,8 +147,8 @@ def render_sidebar():
         )
         crash_penalty = st.number_input(
             "Crash penalty", value=-30.0, step=5.0, key="crash_penalty",
-            help="Reward on any crash: hitting a wall/gate, flying outside the 10×10m room, or "
-                 "reaching the pad faster than the safe landing speed.",
+            help="Reward on any crash: hitting a wall, flying outside the 10×10m room, or reaching "
+                 "the pad faster than the safe landing speed.",
         )
         landing_bonus_base = st.number_input(
             "Landing bonus (base)", value=100.0, step=10.0, key="landing_bonus_base",
@@ -237,7 +224,7 @@ def render_sidebar():
 
         params = dict(
             episodes=int(episodes), max_steps=int(max_steps), seed=int(seed),
-            walls=walls, gates=gates, wind_scale=wind_scale,
+            walls=walls, wind_scale=wind_scale,
             max_cmd_speed=max_cmd_speed, max_accel=max_accel, drone_radius=drone_radius,
             landing_speed_threshold=landing_speed_threshold, pad_radius=pad_radius,
             step_reward=step_reward, shaping_weight=shaping_weight, crash_penalty=crash_penalty,
@@ -316,9 +303,7 @@ def render_room_preview(cfg):
     for z in cfg.wind_zones:
         ax.add_patch(plt.Rectangle((z.x, z.y), z.w, z.h, color="#3a8fd6", alpha=0.25))
     for w in cfg.walls:
-        ax.add_patch(plt.Rectangle((w.x, w.y), w.w, w.h, color="#7b8794"))
-    for g in cfg.gates:
-        ax.add_patch(plt.Rectangle((g.x, g.y), g.w, g.h, color="#e05050", alpha=0.85))
+        ax.add_patch(plt.Rectangle((w.x, w.y), w.w, w.h, color="#e05050", alpha=0.85))
     ax.add_patch(plt.Circle((cfg.pad.x, cfg.pad.y), cfg.pad.radius, color="#35ff8a", alpha=0.35))
     ax.plot(*cfg.start, "o", color="#ffb84d", markersize=10, markeredgecolor="black")
     ax.text(cfg.start[0], cfg.start[1] - 0.6, "start", ha="center", color="#ffb84d", fontsize=8)
@@ -371,7 +356,7 @@ def render_results(params):
 def main():
     st.title("🚁 Room 4 — The Drone Room")
     st.caption(
-        "Fly a drone through wind, moving gates, and speed zones to a soft landing. "
+        "Fly a drone through wind and past danger gates to a soft landing. "
         "Function Approximation (DQN) — continuous state (X, Y, Vx, Vy)."
     )
     st.divider()

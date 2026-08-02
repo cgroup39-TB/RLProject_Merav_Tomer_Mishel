@@ -249,7 +249,7 @@ def run_episode(env, network=None, epsilon=0.0, seed=None, max_steps=None):
     frames = [dict(
         t=0.0, x=float(s[0]), y=float(s[1]), vx=float(s[2]), vy=float(s[3]),
         speed=float(np.hypot(s[2], s[3])), action=HOVER_ACTION,
-        wind=(0.0, 0.0), gates=[], reward=0.0, crashed=False, landed=False,
+        wind=(0.0, 0.0), reward=0.0, crashed=False, landed=False,
     )]
     total_reward = 0.0
     landed = crashed = False
@@ -266,7 +266,7 @@ def run_episode(env, network=None, epsilon=0.0, seed=None, max_steps=None):
         total_reward += r
         frames.append(dict(
             t=info["t"], x=float(s[0]), y=float(s[1]), vx=float(s[2]), vy=float(s[3]),
-            speed=info["speed"], action=a, wind=info["wind"], gates=info["gate_positions"],
+            speed=info["speed"], action=a, wind=info["wind"],
             reward=float(r), crashed=info["crashed"], landed=info["landed"],
         ))
         if done:

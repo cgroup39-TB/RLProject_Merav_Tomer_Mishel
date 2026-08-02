@@ -28,7 +28,6 @@ def _layout_dict(cfg):
         "decel_zones": [
             {"x": z.x, "y": z.y, "w": z.w, "h": z.h} for z in cfg.decel_zones
         ],
-        "gates": [{"w": g.w, "h": g.h} for g in cfg.gates],
         "pad": {"x": cfg.pad.x, "y": cfg.pad.y, "r": cfg.pad.radius},
     }
 
@@ -177,8 +176,8 @@ _TEMPLATE = r"""
     });
     LAYOUT.decel_zones.forEach(z => drawZone(z, "rgba(138,79,214,0.22)"));
 
-    // walls
-    LAYOUT.walls.forEach(w => drawZone(w, "#7b8794", "#c3ccd6"));
+    // walls -- styled as a "danger gate" (red), not a gray factory wall
+    LAYOUT.walls.forEach(w => drawZone(w, "rgba(224,80,80,0.65)", "#ff9a9a"));
 
     // landing pad (pulsing)
     const pulse = 0.5 + 0.5 * Math.sin(simTime * 2.2);
@@ -189,16 +188,6 @@ _TEMPLATE = r"""
     ctx.fillStyle = `rgba(53,255,138,${0.15 + 0.15 * pulse})`;
     ctx.fill();
     ctx.strokeStyle = "#35ff8a"; ctx.lineWidth = 1.5; ctx.stroke();
-
-    // gates at this frame's positions (paired by index with static w/h)
-    (frame.gates || []).forEach((gc, i) => {
-      const gdef = LAYOUT.gates[i];
-      if (!gdef) return;
-      const [gx, gy] = toPx(gc[0] - gdef.w / 2, gc[1] + gdef.h / 2);
-      ctx.fillStyle = "rgba(224,80,80,0.65)";
-      ctx.fillRect(gx, gy, gdef.w * SCALE, gdef.h * SCALE);
-      ctx.strokeStyle = "#ff9a9a"; ctx.strokeRect(gx, gy, gdef.w * SCALE, gdef.h * SCALE);
-    });
 
     // progressive flight trail
     ctx.strokeStyle = "#ffb347"; ctx.lineWidth = 2; ctx.beginPath();
